@@ -8,7 +8,7 @@ Full-duplex 음성 모델(Moshi) 서빙 실험실: 침묵 기반 KV cache 축소
 
 ### 0. 요구 사항
 - Linux, NVIDIA GPU. moshiko fp16(~15.4GB)이 들어갈 메모리가 필요합니다: **24GB GPU 1장**(3090/4090/A100 등) 또는 **16GB GPU 2장**(T4 등, 모델을 반씩 나눠 올림).
-- 디스크 약 25GB (모델 16GB + 데이터 150개 대화 약 3GB + 인코딩 결과)
+- 디스크 약 25GB (모델 16GB + dev/test 대화 200개 약 4GB + 인코딩 결과)
 - Python 3.10 이상. [uv](https://docs.astral.sh/uv/)가 있으면 사용하고, 없으면 `python3 -m venv`로 설치합니다.
 - (선택) `ffmpeg`: 데모용 오디오를 새로 만들 때만 필요합니다.
 
@@ -16,7 +16,7 @@ Full-duplex 음성 모델(Moshi) 서빙 실험실: 침묵 기반 KV cache 축소
 
 ```bash
 git clone https://github.com/Choiyoonsou/fullduplex-serving-lab.git && cd fullduplex-serving-lab
-./setup.sh                     # .venv 생성, torch(CUDA 12.6) 설치, 모델과 DailyTalk 대화 150개 다운로드
+./setup.sh                     # .venv 생성, torch(CUDA 12.6) 설치, 모델과 dev/test 대화 200개 다운로드
 ```
 
 - 모델(`kyutai/moshiko-pytorch-bf16`)과 데이터(`kyutai/DailyTalkContiguous`, CC-BY-SA 4.0)는 Hugging Face에서 자동으로 받습니다. 로그인은 필요 없습니다.
@@ -40,7 +40,7 @@ MEMBER=yschoi TAG=baseline scripts/run_all.sh                    # 정책 30개 
 MEMBER=yschoi TAG=final SPLIT=test CONFIRM_TEST=1 scripts/run_all.sh   # 최종 test 평가 (방법 확정 후 1회)
 MEMBER=jmkim TAG=hang2 NOTE="침묵 판정 여유 2프레임" scripts/run_all.sh --hang 2
 MEMBER=sgkwon TAG=quick N_DIALOGS=20 SKIP_VERIFY=1 scripts/run_all.sh --budgets 125 250
-RUN_DIR=runs/jmkim/20261111-0930_hang2 scripts/run_all.sh        # 중간에 끊긴 run 이어서 실행
+RUN_DIR=runs/jmkim/20261111-0930_dev_hang2 scripts/run_all.sh    # 중간에 끊긴 run 이어서 실행
 ```
 
 데이터 준비 → 정확성 검증 → NLL 그리드 → 분석 순서로 실행합니다. 6×T4에서 GPU 6장을 모두 쓰면 약 1.5시간, 한 사람 몫(GPU 2장)이면 약 4시간이 걸립니다. 스크립트 뒤에 붙인 인자는 `03_run_nll.py`로 그대로 전달됩니다(`--hang`, `--budgets`, `--n_sink`, `--int4`).
@@ -248,7 +248,7 @@ dev에서 정한 설정(P1W window = budget/4, hang 1, sink 4)을 고정한 뒤 
 - B0와 P1(sink 없음)은 budget 500 이하에서 무너집니다.
 - 세션 수 환산(3090, KV 6GB 기준, 두 지표 모두 상한 CI ≤ 0.05): full 4, B1 24~49, **B2 48~96**, P2 48. 이 값은 *메모리만* 기준으로 한 환산이라, 실제 상한은 연산(80ms) 한계에서 먼저 걸릴 가능성이 큽니다. 3090에서 확인해야 합니다.
 
-## 예비 결과 (3개 대화)
+## (기록) 초기 예비 결과 (3개 대화, 정책 설계 근거)
 
 - **sink가 없으면 Moshi가 무너집니다.** budget 125(1분 대화의 약 10초)에서 B0의 content NLL은 +6.0이고, sink 4프레임만 남긴 B1은 +0.09입니다. 계획서의 P1과 B0 비교는 사실상 sink 유무를 비교하게 됩니다.
 - **P1S(침묵 생략 + sink)는 텍스트 NLL에서 B1보다 낫지만**(침묵 60%, budget 125: +0.12 vs +0.25), **음성 cb0 NLL이 budget과 관계없이 약 +1.0 나빠집니다.** 최근 침묵 프레임까지 버리기 때문으로 보입니다.

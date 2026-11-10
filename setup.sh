@@ -41,4 +41,4 @@ EOF
 if [ "${1:-}" != "--no-download" ]; then
   "$PY" scripts/00_download.py   # dev + test splits (200 dialogs)
 fi
-echo "setup done. Next: PYTHONPATH=. $PY tests/test_policies.py && scripts/run_all.sh"
+echo "setup done. Next: PYTHONPATH=. $PY tests/test_policies.py && scripts/serve_console.sh   (or: MEMBER=<id> TAG=<name> scripts/run_all.sh)"
