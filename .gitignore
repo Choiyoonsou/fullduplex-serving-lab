@@ -1,0 +1,39 @@
+# ---- environment / caches -------------------------------------------------
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+# model weights (~16GB): fetched by setup.sh / run_all.sh
+hf_cache/
+
+# ---- data: never in git, downloaded on first run --------------------------
+# DailyTalk audio + Mimi-encoded tokens (~4GB)
+data/
+*.wav
+*.pt
+*.safetensors
+
+# ---- run outputs: commit only meta.json, ids.txt, summary.jsonl.gz, analysis/
+# per-frame NLL (~0.3MB per dialog x ratio)
+runs/**/*.npz
+# merged into summary.jsonl.gz when a run finishes
+runs/**/summary_shard*.jsonl
+runs/**/logs/
+logs/
+results/
+
+# ---- temp files -------------------------------------------------------------
+*.tmp
+*.log
+nohup.out
+
+# ---- editors / OS -----------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# experiment console job state (per server)
+console/state/

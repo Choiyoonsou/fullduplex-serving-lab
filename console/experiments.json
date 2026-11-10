@@ -1,0 +1,76 @@
+{
+  "_comment": "Experiment catalog for the console. 'ready' types run through scripts/run_all.sh (EXP=<id>); params map 1:1 to scripts/03_run_nll.py flags. Other entries document what each candidate from the research plan needs.",
+  "groups": {
+    "A": {"title": "오프라인 품질 평가", "desc": "teacher-forced NLL 하네스. 이 서버(T4)에서 바로 실행됩니다."},
+    "B": {"title": "실시간 다중 세션 서빙", "desc": "다중 세션 LMGen 루프, 부하 생성기, 프레임별 타이밍 로그가 필요합니다. 수치는 RTX 3090에서 측정해야 의미가 있습니다."},
+    "C": {"title": "다른 모델·데이터·학습", "desc": "Moshi 영어 모델과 DailyTalk만으로는 할 수 없는 주제입니다."}
+  },
+  "experiments": [
+    {
+      "id": "kv_policy", "group": "A", "status": "ready",
+      "title": "침묵 기반 KV cache 축소", "candidate": "KV cache 관리",
+      "question": "침묵과 화자 정보를 쓰는 KV 축소가 같은 메모리에서 텍스트 LLM용 기법보다 품질을 더 잘 지키는가?",
+      "metrics": ["Δ 텍스트 NLL(내용)", "Δ 음성 cb0 NLL", "턴 시작 / EPAD / 듣는 중 NLL", "3090 동시 세션 환산"],
+      "analysis": ["variants", "kv", "hypotheses"],
+      "params": [
+        {"key": "kinds", "cli": "--kinds", "type": "multi", "label": "정책", "options": ["B0", "B1", "P1", "P1S", "P1W", "B2", "P2"], "default": ["B0", "B1", "P1", "P1S", "P1W", "B2", "P2"], "help": "full과 full_int8은 항상 포함됩니다."},
+        {"key": "budgets", "cli": "--budgets", "type": "multi", "label": "세션당 KV 메모리 (bf16 프레임)", "options": [125, 250, 500, 1000], "labels": ["62MB", "125MB", "250MB", "500MB"], "default": [125, 250, 500, 1000]},
+        {"key": "n_sink", "cli": "--n_sink", "type": "int", "label": "sink 프레임 수", "min": 0, "max": 32, "default": 4, "help": "B1, P1S, P1W, B2, P2에 적용."},
+        {"key": "hang", "cli": "--hang", "type": "int", "label": "침묵 판정 여유 (프레임)", "min": 0, "max": 6, "default": 1, "help": "발화 구간 앞뒤로 이만큼을 발화로 취급합니다."},
+        {"key": "int4", "cli": "--int4", "type": "bool", "label": "int4 정책도 추가", "default": false}
+      ]
+    },
+    {
+      "id": "rvq", "group": "A", "status": "ready",
+      "title": "RVQ 단계 조절의 품질 영향", "candidate": "RVQ 단계 조절",
+      "question": "과부하 때 Moshi 음성 codebook을 k개만 생성하면, 다음 프레임 입력에서 빠진 codebook 때문에 모델의 이해가 얼마나 나빠지는가?",
+      "metrics": ["Δ 텍스트 NLL", "Δ 음성 cb0 NLL", "턴테이킹 지표"],
+      "note": "Phase 0에서 연산 절감이 작아 주제로는 기각했지만(k=4에서 7~9%), 품질 비용은 측정하지 않았습니다. 생성 음질(Mimi 디코딩)은 이 실험에 포함되지 않습니다.",
+      "analysis": ["variants"],
+      "params": [
+        {"key": "rvq_ks", "cli": "--rvq_ks", "type": "multi", "label": "남길 codebook 수 k", "options": [7, 6, 5, 4, 3, 2, 1], "default": [6, 4, 2, 1], "help": "기준은 8개 전부(full)."}
+      ]
+    },
+    {
+      "id": "kv_quant", "group": "A", "status": "ready",
+      "title": "KV 양자화와 대화 타이밍", "candidate": "양자화와 대화 타이밍",
+      "question": "KV를 낮은 비트로 저장하면, 일반 내용보다 끼어들기·맞장구·말 시작 타이밍이 먼저 망가지는가?",
+      "metrics": ["Δ 턴 시작 NLL", "Δ EPAD(말 시작 결정) NLL", "Δ 듣는 중 침묵 유지 NLL", "Δ 텍스트 / cb0 NLL"],
+      "note": "가중치 양자화(FP8/INT4)는 아직 지원하지 않고, KV cache 비트 수만 바꿉니다.",
+      "analysis": ["variants"],
+      "params": [
+        {"key": "kv_bits", "cli": "--kv_bits", "type": "multi", "label": "KV 비트 수", "options": [8, 6, 5, 4, 3, 2], "default": [8, 6, 4, 3], "help": "기준은 fp16 KV(full)."}
+      ]
+    },
+    {"id": "interrupt_ctx", "group": "A", "status": "planned", "title": "끼어들기 이후 맥락 유지", "candidate": "끼어들기 이후 맥락 유지",
+     "question": "말이 끊긴 뒤 모델이 앞 맥락을 제대로 반영하는가?", "metrics": ["끼어들기 이후 구간 Δ NLL"],
+     "needs": ["턴을 겹치게 재배치하는 데이터 생성 기능(fdkv/data.py에 overlap 옵션)", "끼어들기 직후 구간 지표"]},
+    {"id": "capacity", "group": "B", "status": "serving", "title": "동시 세션 한계 측정", "candidate": "동시 세션 한계 측정",
+     "question": "80ms 마감을 지키는 GPU당 세션 수와 병목은?", "metrics": ["프레임 시간 p50/p99", "마감 위반률", "SLO 내 최대 세션 수"],
+     "needs": ["다중 세션 서빙 하네스", "RTX 3090"], "preview": ["세션 수 범위", "context 길이", "KV 정책", "CUDA Graph 사용 여부"]},
+    {"id": "edf", "group": "B", "status": "serving", "title": "프레임 박자 고려 스케줄링", "candidate": "프레임 박자 고려 스케줄링",
+     "question": "세션별 80ms 위상을 고려한 배치(EDF)가 마감 위반을 줄이는가?", "metrics": ["마감 위반률", "배치 크기 분포"],
+     "needs": ["서빙 하네스", "스케줄러 플러그인"], "preview": ["스케줄러: FIFO / EDF", "도착 분포", "세션 수"]},
+    {"id": "silence_skip", "group": "B", "status": "serving", "title": "침묵 프레임 연산 건너뛰기", "candidate": "침묵 프레임 연산 건너뛰기",
+     "question": "양쪽 다 침묵인 프레임에서 depth를 생략하면 얼마나 빨라지고 무엇이 깨지는가?", "metrics": ["프레임 시간", "음질·타이밍 변화"],
+     "needs": ["서빙 하네스", "생성 품질 평가(ASR)"], "preview": ["생략 대상: depth / temporal", "침묵 판정 기준"]},
+    {"id": "stage_split", "group": "B", "status": "serving", "title": "단계별 장비 분리", "candidate": "단계별 장비 분리",
+     "question": "코덱·depth를 저렴한 GPU나 CPU로 옮기면 메인 GPU 세션 수가 늘어나는가?", "metrics": ["세션 수", "단계 간 전송 지연"],
+     "needs": ["서빙 하네스", "단계별 배치 기능"], "preview": ["Mimi 위치", "depth 위치"]},
+    {"id": "llm_coexist", "group": "B", "status": "serving", "title": "실시간·일반 LLM 요청 공존", "candidate": "실시간·일반 LLM 요청 공존",
+     "question": "80ms 틈새에 배치성 텍스트 요청을 끼워 넣어도 마감을 지키는가?", "metrics": ["마감 위반률", "텍스트 처리량"],
+     "needs": ["서빙 하네스", "텍스트 요청 부하"], "preview": ["텍스트 요청 비율", "우선순위 정책"]},
+    {"id": "loadgen", "group": "B", "status": "serving", "title": "부하 생성기·벤치마크", "candidate": "부하 생성기·벤치마크",
+     "question": "발화·침묵 패턴을 재현하는 스트리밍 세션 벤치마크", "metrics": ["재현성", "세션 패턴 분포"],
+     "needs": ["서빙 하네스 (부하 생성기는 그 일부)"], "preview": ["포아송 도착률", "침묵 비율", "세션 길이"]},
+    {"id": "migration", "group": "B", "status": "serving", "title": "세션 라우팅·이동", "candidate": "세션 라우팅·이동",
+     "question": "오래 유지되는 세션의 KV를 끊김 없이 다른 노드로 옮길 수 있는가?", "metrics": ["이동 중 끊김 시간", "부하 균형"],
+     "needs": ["서빙 하네스", "다중 노드"], "preview": ["이동 트리거", "KV 전송 방식"]},
+    {"id": "ko_turn", "group": "C", "status": "model", "title": "한국어 turn-taking 평가", "candidate": "한국어 turn-taking 평가",
+     "question": "맞장구·어미 특성을 반영한 한국어 테스트셋", "metrics": ["타이밍 정확도"], "needs": ["한국어 full-duplex 모델", "한국어 2인 대화 데이터"]},
+    {"id": "cascaded", "group": "C", "status": "model", "title": "Cascaded vs native", "candidate": "Cascaded vs native",
+     "question": "VAD+ASR+LLM+TTS와 native 모델의 지연·비용 비교", "metrics": ["응답 지연", "GPU 비용"], "needs": ["cascaded 파이프라인 구축"]},
+    {"id": "text_fd", "group": "C", "status": "model", "title": "텍스트로 full duplex 흉내", "candidate": "텍스트로 full duplex 흉내",
+     "question": "시간 슬롯별 <silence> 토큰으로 turn-taking을 학습할 수 있는가?", "metrics": ["turn-taking 정확도"], "needs": ["학습 파이프라인", "학습용 GPU"]}
+  ]
+}

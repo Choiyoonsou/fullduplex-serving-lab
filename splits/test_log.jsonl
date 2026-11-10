@@ -1,0 +1,1 @@
+{"member": "yschoi", "tag": "final", "started": "2026-11-10T07:01:09", "git_commit": null, "git_dirty": true, "nll_args": [], "note": "frozen eval: P1W recent=budget/4, hang=1, sink=4; tuned on dev only", "run": "runs/yschoi/20261110-0701_test_final"}

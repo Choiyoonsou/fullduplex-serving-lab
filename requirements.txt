@@ -1,0 +1,11 @@
+# torch/torchaudio are installed by setup.sh from the PyTorch CUDA index (see TORCH_INDEX there).
+moshi==0.2.13
+einops==0.8.2
+sentencepiece==0.2.3
+safetensors==0.7.0
+huggingface-hub==0.36.2
+numpy==2.2.6
+pandas==3.1.1
+matplotlib==3.11.2
+soundfile==0.14.0
+tqdm==4.70.1

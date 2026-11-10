@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Moshi KV 시뮬레이터</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: one working column. Controls bar on top, a full-dialog timeline (speech -> KV contents -> ΔNLL) under it, results below. */
+:root {
+  --bg: #f5f6f8;
+  --panel: #ffffff;
+  --ink: #18202b;
+  --ink-2: #4a5566;
+  --ink-3: #7b8595;
+  --line: #dde1e8;
+  --track: #eceff3;
+  --accent: #2a78d6;
+  --sink: #eb6834;
+  --long: #1baf7a;
+  --recent: #2a78d6;
+  --evicted: #c9ced7;
+  --speech: #3c4656;
+  --user: #8a94a6;
+  --bubble-u: #eaf1fb;
+  --ok: #23824f; --bad: #c2410c; --na: #7b8595;
+  --k-B0: #2a78d6; --k-B1: #eb6834; --k-B2: #1baf7a; --k-P1: #eda100;
+  --k-P1S: #e87ba4; --k-P1W: #6250d6; --k-P2: #e34948;
+  --f-body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12151a; --panel: #1a1e25; --ink: #eef0f3; --ink-2: #b9c0cb; --ink-3: #8790a0;
+    --line: #2c323c; --track: #232831; --accent: #3987e5; --sink: #d95926; --long: #199e70;
+    --recent: #3987e5; --evicted: #3a414c; --speech: #c9d0da; --user: #7d8798;
+    --bubble-u: #1f2a38; --ok: #4cbb7f; --bad: #f08a5d; --na: #8790a0;
+    --k-B0: #3987e5; --k-B1: #d95926; --k-B2: #199e70; --k-P1: #c98500;
+    --k-P1S: #d55181; --k-P1W: #9085e9; --k-P2: #e66767;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12151a; --panel: #1a1e25; --ink: #eef0f3; --ink-2: #b9c0cb; --ink-3: #8790a0;
+  --line: #2c323c; --track: #232831; --accent: #3987e5; --sink: #d95926; --long: #199e70;
+  --recent: #3987e5; --evicted: #3a414c; --speech: #c9d0da; --user: #7d8798;
+    --bubble-u: #1f2a38; --ok: #4cbb7f; --bad: #f08a5d; --na: #8790a0;
+  --k-B0: #3987e5; --k-B1: #d95926; --k-B2: #199e70; --k-P1: #c98500;
+  --k-P1S: #d55181; --k-P1W: #9085e9; --k-P2: #e66767;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { color-scheme: light; }
+body { margin: 0; }
+[hidden] { display: none !important; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 15px; line-height: 1.55;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 28px 64px;
+}
+.wrap { max-width: 1120px; margin: 0 auto; display: grid; gap: 28px; }
+h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.01em; margin: 0; text-wrap: balance; }
+h2 { font-size: 18px; font-weight: 600; margin: 0; text-wrap: balance; }
+.lede { color: var(--ink-2); max-width: 68ch; margin: 6px 0 0; }
+.mono { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 18px; display: grid; gap: 16px; min-width: 0; }
+.controls { display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: flex-end; }
+.ctl { display: grid; gap: 6px; min-width: 0; }
+.ctl > span { font-size: 12px; color: var(--ink-3); letter-spacing: 0.04em; text-transform: uppercase; }
+select { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+.seg { display: flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { font: inherit; font-size: 14px; color: var(--ink-2); background: transparent; border: 0; border-right: 1px solid var(--line); padding: 6px 12px; cursor: pointer; }
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--panel); }
+.seg button:focus-visible, select:focus-visible, .play:focus-visible, .chip:focus-visible, canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.policy-seg button { display: inline-flex; align-items: center; gap: 6px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
+.play { font: inherit; font-weight: 600; background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 7px 16px; cursor: pointer; min-width: 92px; }
+.policy-desc { color: var(--ink-2); margin: 0; font-size: 14px; max-width: 80ch; }
+.policy-desc b { color: var(--ink); font-weight: 600; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.stat { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 2px; min-width: 0; }
+.stat .k { font-size: 12px; color: var(--ink-3); }
+.stat .v { font-family: var(--f-mono); font-size: 20px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.stat .s { font-size: 12px; color: var(--ink-3); }
+.tl { position: relative; min-width: 0; }
+.tl canvas { width: 100%; display: block; cursor: crosshair; touch-action: none; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sw { width: 14px; height: 10px; border-radius: 2px; display: inline-block; }
+.chat-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; align-items: baseline; }
+.chat-key { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--ink-3); }
+.chat-key b { font-weight: 500; color: var(--ink-2); }
+.chat { height: 400px; overflow-y: auto; position: relative; display: flex; flex-direction: column; gap: 10px; padding: 14px; background: var(--track); border-radius: 10px; overscroll-behavior: contain; }
+.turn { display: grid; gap: 3px; max-width: 78%; cursor: pointer; }
+.turn.M { align-self: flex-start; }
+.turn.U { align-self: flex-end; }
+.turn .who { font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.turn.U .who { text-align: right; }
+.bubble { padding: 8px 12px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); line-height: 1.65; overflow-wrap: anywhere; }
+.turn.M .bubble { border-top-left-radius: 4px; }
+.turn.U .bubble { border-top-right-radius: 4px; background: var(--bubble-u); }
+.turn.cur .bubble { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.turn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 14px; }
+.bubble span { transition: opacity .25s, color .25s; border-radius: 3px; }
+.bubble .fut { opacity: .3; }
+.bubble .gone { color: var(--ink-3); opacity: .5; text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--ink-3) 70%, transparent); }
+.bubble .onlyA { box-shadow: inset 0 -2px 0 var(--ka); }
+.bubble .now { background: color-mix(in srgb, var(--accent) 24%, transparent); }
+.gapchip { align-self: center; font-size: 12px; color: var(--ink-3); border: 1px dashed color-mix(in srgb, var(--ink-3) 50%, transparent); border-radius: 999px; padding: 2px 10px; background: var(--panel); font-variant-numeric: tabular-nums; }
+@media (max-width: 560px) { .turn { max-width: 92%; } .chat { height: 340px; } }
+@media (prefers-reduced-motion: reduce) { .bubble span { transition: none; } }
+.find td, .find th { vertical-align: top; }
+.find td:first-child { text-align: left; min-width: 220px; }
+.find .h { font-family: var(--f-mono); font-size: 12px; color: var(--ink-3); }
+.find .claim { font-weight: 600; }
+.find .sub { font-size: 12px; color: var(--ink-3); }
+.find .val { font-family: var(--f-mono); font-size: 13px; white-space: nowrap; }
+.pill { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; border-radius: 999px; padding: 1px 8px; border: 1px solid currentColor; white-space: nowrap; }
+.pill.ok { color: var(--ok); } .pill.bad { color: var(--bad); } .pill.na { color: var(--na); font-weight: 500; }
+.results { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 18px; }
+@media (max-width: 860px) { .results { grid-template-columns: 1fr; } }
+.chart-wrap { position: relative; min-width: 0; }
+.chart-wrap svg { width: 100%; height: auto; display: block; overflow: visible; }
+.tip { position: absolute; pointer-events: none; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 13px; box-shadow: 0 4px 16px rgb(0 0 0 / 0.12); white-space: nowrap; z-index: 2; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font: inherit; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink-2); border-radius: 999px; padding: 3px 10px; cursor: pointer; }
+.chip[aria-pressed="false"] { opacity: 0.45; }
+.tablebox { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+th:first-child, td:first-child { text-align: left; }
+th { font-weight: 500; color: var(--ink-3); font-size: 12px; }
+td.best { font-weight: 700; }
+.note { font-size: 13px; color: var(--ink-3); margin: 0; max-width: 80ch; }
+.defs { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px 22px; margin: 0; }
+.defs div { display: grid; gap: 2px; }
+.defs dt { font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.defs dd { margin: 0; color: var(--ink-2); font-size: 14px; }
+.loading { color: var(--ink-3); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Moshi KV 시뮬레이터</h1>
+    <p class="lede">Full-duplex 음성 모델 Moshi는 80ms마다 프레임을 하나씩 KV cache에 쌓습니다. 정책과 메모리를 고르고 대화를 재생하면, 각 순간에 모델이 대화의 어느 부분을 아직 기억하는지, 그리고 그 때문에 예측이 얼마나 나빠지는지 볼 수 있습니다. 두 정책을 겹쳐 비교할 수도 있습니다. 수치는 DailyTalk 대화로 실제 moshiko를 teacher-forcing해서 얻은 값입니다.</p>
+    <p class="note" style="margin-top:6px"><a href="../" id="consolelink" style="color:var(--accent)" hidden>← 실험 콘솔</a> 오디오 출처: <a href="https://huggingface.co/datasets/kyutai/DailyTalkContiguous" style="color:var(--accent)">DailyTalkContiguous</a> (CC-BY-SA 4.0). 침묵 비율에 맞게 턴 간격을 다시 배치했습니다.</p>
+  </header>
+
+  <section class="panel" aria-labelledby="find-h">
+    <h2 id="find-h">핵심 결과</h2>
+    <p class="note">미리 정해 둔 가설 검정의 대표 비교입니다. 분석 단위는 대화이고, paired permutation 검정 후 Holm 보정을 했습니다. <b>dev</b>는 파라미터 튜닝에 쓴 100개 대화, <b>test</b>는 설정을 고정한 뒤 한 번만 평가한 다른 100개 대화입니다. 값은 ΔNLL 차이(nats)와 95% CI입니다.</p>
+    <div class="tablebox"><table class="find" id="find"></table></div>
+  </section>
+
+  <section class="panel" aria-labelledby="sim-h">
+    <h2 id="sim-h">정책 시뮬레이터</h2>
+    <div class="controls">
+      <label class="ctl"><span>대화</span><select id="dlg"></select></label>
+      <div class="ctl"><span>침묵 비율</span><div class="seg" id="ratio"></div></div>
+      <div class="ctl"><span>세션당 KV 메모리</span><div class="seg" id="budget"></div></div>
+      <button class="play" id="play" type="button">▶ 재생</button>
+      <span class="mono" id="clock" style="color:var(--ink-2)">0:00.0</span>
+    </div>
+    <div class="controls">
+      <div class="ctl"><span>KV 정책</span><div class="seg policy-seg" id="policy"></div></div>
+      <div class="ctl"><span>비교할 정책</span><div class="seg policy-seg" id="cmp"></div></div>
+    </div>
+    <p class="policy-desc" id="pdesc"></p>
+    <div class="stats" id="stats"></div>
+    <div class="legend">
+      <span><i class="sw" style="background:var(--speech)"></i>Moshi 발화(왼쪽 채널)</span>
+      <span><i class="sw" style="background:var(--user)"></i>사용자 발화(오른쪽 채널)</span>
+      <span><i class="sw" style="background:var(--sink)"></i>sink</span>
+      <span><i class="sw" style="background:var(--long)"></i>장기 기억</span>
+      <span><i class="sw" style="background:var(--recent)"></i>최근 window</span>
+      <span><i class="sw" style="background:var(--evicted)"></i>잊힘(cache에 없음)</span>
+    </div>
+    <div class="tl"><canvas id="tl" tabindex="0" aria-label="대화 타임라인. 클릭하거나 좌우 화살표로 이동"></canvas></div>
+    <p class="note">타임라인을 클릭하거나 드래그하면 그 위치로 이동합니다(키보드: ← →, 스페이스로 재생). ΔNLL은 같은 대화를 전체 context로 봤을 때와의 차이이며 2초 이동평균입니다. 0보다 위면 기억을 잃어서 예측이 나빠진 것입니다. 점선은 비교 정책입니다.</p>
+    <div class="chat-head">
+      <h2 style="font-size:16px">대화</h2>
+      <div class="chat-key" id="chatkey"></div>
+    </div>
+    <div class="chat" id="chat" aria-label="대화 내용. 말풍선을 누르면 그 위치로 이동"></div>
+    <p class="note">Moshi 쪽 단어는 데이터셋의 정렬 정보, 사용자 쪽은 Whisper 자동 전사(표시용)입니다. 단어 위치는 80ms 프레임 단위입니다.</p>
+    <audio id="audio" preload="auto"></audio>
+  </section>
+
+  <section class="panel" aria-labelledby="res-h">
+    <h2 id="res-h">전체 결과</h2>
+    <div class="controls">
+      <div class="ctl"><span>지표</span><div class="seg" id="metric"></div></div>
+      <div class="ctl"><span>침묵 비율</span><div class="seg" id="ratio2"></div></div>
+    </div>
+    <div class="chips" id="chips"></div>
+    <div class="results">
+      <div class="chart-wrap" id="chartwrap"><svg id="chart" viewBox="0 0 640 380" role="img" aria-label="메모리 대비 ΔNLL"></svg><div class="tip" id="tip" hidden></div></div>
+      <div style="display:grid;gap:10px;align-content:start;min-width:0">
+        <h2 style="font-size:16px">RTX 3090 동시 세션 수</h2>
+        <p class="note">KV에 6GB를 쓸 수 있다고 가정했을 때(Phase 0 측정), 두 지표 모두 ΔNLL 95% 상한이 0.05 이하인 가장 작은 메모리로 환산한 값입니다. 메모리만 따진 수치라서, 실제 상한은 80ms 연산 예산에서 먼저 걸릴 수 있습니다.</p>
+        <div class="tablebox"><table id="cap"></table></div>
+      </div>
+    </div>
+    <p class="note" id="resnote"></p>
+  </section>
+
+  <section class="panel" aria-labelledby="def-h">
+    <h2 id="def-h">정책 정의</h2>
+    <dl class="defs" id="defs"></dl>
+    <p class="note">모든 정책은 Moshi의 RingKVCache와 같은 슬롯 단위로 동작합니다. 1프레임은 32층 × K/V × 4096차원이고 bf16 기준 0.5MB입니다. int8 정책은 같은 메모리에 슬롯을 2배 둡니다. 침묵은 양 채널 에너지(-45dBFS)로 판정하고 앞뒤 1프레임을 여유로 둡니다.</p>
+  </section>
+</div>
+
+<script>
+const KINDS = {
+  B0:  { name: "B0 ring buffer", desc: "가장 최근 프레임만 링 버퍼에 남깁니다. 대화 첫 프레임(attention sink)도 밀려나기 때문에 Moshi가 크게 흔들립니다." },
+  B1:  { name: "B1 sink + window", desc: "대화 맨 앞 4프레임(sink)을 고정하고 나머지는 최근 프레임만 남깁니다(StreamingLLM)." },
+  P1:  { name: "P1 침묵 생략", desc: "양쪽이 모두 침묵인 프레임은 KV에 쓰지 않습니다. 계획서 원안이며 sink는 없습니다." },
+  P1S: { name: "P1S 침묵 생략 + sink", desc: "P1에 sink 4프레임을 더한 것으로, B1과 바로 비교하는 대조군입니다. 방금 지나간 침묵까지 버리기 때문에 음성 예측이 나빠집니다." },
+  P1W: { name: "P1W 침묵 생략 + 최근 window", desc: "sink 4프레임, 최근 1/4 구간은 침묵이어도 모두 유지하고, 그보다 오래된 기억에서만 침묵을 버립니다." },
+  B2:  { name: "B2 B1 + int8", desc: "B1과 같은 방식에 KV를 int8로 저장합니다. 같은 메모리에 2배 많은 프레임이 들어갑니다." },
+  P2:  { name: "P2 P1W + int8", desc: "P1W에 int8을 결합합니다. 같은 메모리에서 시간상 가장 넓은 범위를 덮습니다." },
+};
+const KIND_ORDER = ["B0", "B1", "P1", "P1S", "P1W", "B2", "P2"];
+const BUDGETS = [125, 250, 500, 1000];
+const RATIOS = ["r0.2", "r0.4", "r0.6"];
+const FR = 12.5;
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const $ = id => document.getElementById(id);
+const st = { dlg: 0, ratio: "r0.6", budget: 125, kind: "P1W", cmp: "B1", metric: "d_text_nll_content", ratio2: 0.6,
+             shown: new Set(["B1", "P1S", "P1W", "B2", "P2"]), frame: 0 };
+try { const s = JSON.parse(localStorage.getItem("kvsim") || "{}"); Object.assign(st, s, { shown: new Set(s.shown || [...st.shown]), frame: 0 }); } catch (e) {}
+function save() { try { localStorage.setItem("kvsim", JSON.stringify({ ...st, shown: [...st.shown], frame: 0 })); } catch (e) {} }
+
+let D, cur = {};
+const decodeU8 = b => Uint8Array.from(atob(b), c => c.charCodeAt(0));
+const esc = t => t.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const sign = v => (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(3);
+
+function segButtons(el, items, get, set) {
+  el.innerHTML = "";
+  for (const [val, label, color] of items) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.innerHTML = (color ? `<i class="dot" style="background:var(${color})"></i>` : "") + label;
+    b.setAttribute("aria-pressed", String(get() === val));
+    b.onclick = () => { set(val); save(); [...el.children].forEach((c, i) => c.setAttribute("aria-pressed", String(items[i][0] === get()))); };
+    el.appendChild(b);
+  }
+}
+
+function policyFor(kind, budget) {
+  const ps = D.policies.filter(p => p.kind === kind);
+  return ps.reduce((a, p) => Math.abs(p.budget - budget) < Math.abs(a.budget - budget) ? p : a, ps[0]);
+}
+
+function smooth(a, w) {
+  const out = new Float32Array(a.length); let s = 0;
+  for (let i = 0; i < a.length; i++) { s += a[i]; if (i >= w) s -= a[i - w]; out[i] = s / Math.min(i + 1, w); }
+  return out;
+}
+
+function polData(R, kind, keep, full, wordFrames) {
+  const S = R.S, pol = policyFor(kind, st.budget);
+  const k = pol.skip ? keep : new Uint8Array(S).fill(1);
+  const cnt = new Int32Array(S); let c = 0;
+  for (let i = 0; i < S; i++) { c += k[i]; cnt[i] = c; }
+  const get = m => Float32Array.from(decodeU8(R.nll[pol.tag][m]), x => x / 20);
+  const pt = get("text"), pc = get("cb0");
+  const dt = pt.map((x, i) => x - full.t[i]), dc = pc.map((x, i) => x - full.c[i]);
+  let s1 = 0, n1 = 0, s2 = 0;
+  for (let i = 0; i < S; i++) { if (wordFrames.has(i)) { s1 += dt[i]; n1++; } s2 += dc[i]; }
+  return { kind, pol, k, cnt, dt: smooth(dt, 25), dc: smooth(dc, 25), meanT: s1 / Math.max(n1, 1), meanC: s2 / S };
+}
+
+function prepare() {
+  const R = D.dialogs[st.dlg].ratios[st.ratio];
+  const S = R.S;
+  const keep = decodeU8(R.keep);
+  const fullTag = D.policies.find(p => p.kind === "full").tag;
+  const full = { t: Float32Array.from(decodeU8(R.nll[fullTag].text), x => x / 20), c: Float32Array.from(decodeU8(R.nll[fullTag].cb0), x => x / 20) };
+  const wordFrames = new Set(R.words.map(w => w[0]));
+  cur = { R, S, sp0: decodeU8(R.speech0), sp1: decodeU8(R.speech1),
+          A: polData(R, st.kind, keep, full, wordFrames),
+          B: st.cmp !== "none" && st.cmp !== st.kind ? polData(R, st.cmp, keep, full, wordFrames) : null };
+  const a = $("audio");
+  if (!a.src.endsWith(R.audio)) { const playing = !a.paused; a.src = R.audio; st.frame = Math.min(st.frame, S - 1); if (playing) a.play().catch(() => {}); }
+  $("pdesc").innerHTML = `<b>${KINDS[st.kind].name}</b> · ${KINDS[st.kind].desc}` +
+    (cur.B ? `<br><span style="color:var(--ink-3)">비교: <b style="color:var(--ink-2)">${KINDS[cur.B.kind].name}</b> (점선)</span>` : "");
+  buildChat(); draw(); stats(); updateChat(true);
+}
+
+// visibility of frame j at step s under policy P; 0 = forgotten, 1 = sink, 2 = long-term, 3 = recent, -1 = future
+function visClass(P, s, j) {
+  const p = P.pol, W = p.recent, C = Math.min(p.slots, 3000), nRing = C - W - p.n_sink;
+  if (j > s) return -1;
+  if (s - j < W) return 3;
+  if (!P.k[j]) return 0;
+  if (P.cnt[j] <= p.n_sink) return 1;
+  const left = s - W >= 0 ? P.cnt[s - W] : 0;
+  return (left - P.cnt[j] < nRing) ? 2 : 0;
+}
+
+function memory(P, s) {
+  let vis = 0, back = s;
+  for (let j = 0; j <= s; j++) if (visClass(P, s, j) > 0) vis++;
+  // continuous memory: how far back with no forgotten *speech* frame (dropped silence does not count as a gap)
+  for (let j = s; j >= 0; j--) { const v = visClass(P, s, j); if (v === 0) { if (P.k[j] || !P.pol.skip) break; } else if (v !== 1) back = j; }
+  return { vis, span: (s - back) / FR };
+}
+
+function fmtT(sec) { const m = Math.floor(sec / 60), s = sec - m * 60; return `${m}:${s.toFixed(1).padStart(4, "0")}`; }
+
+function stats() {
+  const s = st.frame, A = cur.A, B = cur.B, p = A.pol;
+  const mA = memory(A, s), mB = B ? memory(B, s) : null;
+  const vs = (fa, fb) => B ? `${B.kind}: ${fb}` : fa;
+  const items = [
+    ["세션당 KV", `${p.kv_mb.toFixed(0)} MB`, `${p.slots} 슬롯${p.bits ? " · int" + p.bits : " · bf16"}`],
+    ["3090 동시 세션", `${Math.floor(6 * 1024 / p.kv_mb)}`, "KV 6GB 기준 · 전체 context는 4"],
+    ["지금 기억하는 프레임", `${mA.vis}`, vs(`현재 ${s + 1}프레임 중`, mB && mB.vis)],
+    ["끊김 없이 기억하는 범위", `${mA.span.toFixed(1)}초`, vs("버린 침묵은 끊김으로 안 침", mB && mB.span.toFixed(1) + "초")],
+    ["이 대화 Δ 텍스트 NLL", sign(A.meanT), vs("단어 프레임 평균", B && sign(B.meanT))],
+    ["이 대화 Δ 음성 cb0 NLL", sign(A.meanC), vs("전체 프레임 평균", B && sign(B.meanC))],
+  ];
+  $("stats").innerHTML = items.map(([k, v, s2]) => `<div class="stat"><span class="k">${k}</span><span class="v">${v}</span><span class="s">${s2}</span></div>`).join("");
+  $("clock").textContent = `${fmtT(s / FR)} / ${fmtT(cur.S / FR)}`;
+}
+
+// ---------- conversation ----------
+function buildChat() {
+  const R = cur.R, turns = R.turns || [], A = cur.A, box = $("chat");
+  box.style.setProperty("--ka", css("--k-" + A.kind));
+  let html = "", prevEnd = -1;
+  turns.forEach((t, i) => {
+    const f0 = t.words[0][0], f1 = t.words[t.words.length - 1][0];
+    if (prevEnd >= 0 && f0 - prevEnd > 8) {
+      let sil = 0, dropped = 0;
+      for (let f = prevEnd + 1; f < f0; f++) if (!cur.sp0[f] && !cur.sp1[f]) { sil++; if (!A.k[f]) dropped++; }
+      if (sil / FR >= 0.6) html += `<div class="gapchip">침묵 ${(sil / FR).toFixed(1)}초` +
+        (A.pol.skip ? ` · ${A.kind}는 ${(dropped / FR).toFixed(1)}초 분량을 KV에 안 씀` : "") + `</div>`;
+    }
+    const who = t.spk === "M" ? "Moshi" : "사용자";
+    html += `<div class="turn ${t.spk}" data-f0="${f0}" tabindex="0" role="button" aria-label="${who} ${fmtT(f0 / FR)}로 이동">` +
+      `<div class="who">${who} · ${fmtT(f0 / FR).replace(/\.\d$/, "")}</div><div class="bubble">` +
+      t.words.map(w => `<span data-f="${w[0]}">${esc(w[1])}</span>`).join(" ") + `</div></div>`;
+    prevEnd = f1;
+  });
+  box.innerHTML = html || `<p class="note">이 대화의 전사가 없습니다.</p>`;
+  cur.spans = [...box.querySelectorAll("span[data-f]")].map(el => ({ el, f: +el.dataset.f, cls: "" }));
+  cur.turns = [...box.querySelectorAll(".turn")].map(el => ({ el, f0: +el.dataset.f0, spans: [...el.querySelectorAll("span[data-f]")] }));
+  cur.curTurn = -1;
+  for (const t of cur.turns) {
+    t.el.onclick = () => seekFrame(t.f0);
+    t.el.onkeydown = ev => { if (ev.key === "Enter" || ev.key === " ") { seekFrame(t.f0); ev.preventDefault(); } };
+  }
+  const B = cur.B;
+  $("chatkey").innerHTML = `<span>흐린 글씨 = 아직 하지 않은 말</span><span>취소선 = <b>${A.kind}</b>의 KV에서 사라진 말</span>` +
+    (B ? `<span><i class="sw" style="height:3px;background:var(--k-${A.kind})"></i> 밑줄 = <b>${A.kind}</b>는 기억하지만 <b>${B.kind}</b>는 잊은 말</span>` : "");
+}
+
+function updateChat(force) {
+  const s = st.frame, A = cur.A, B = cur.B;
+  let nowIdx = -1;
+  cur.spans.forEach((w, i) => { if (w.f <= s && s - w.f < 15) nowIdx = i; });
+  cur.spans.forEach((w, i) => {
+    let c = "";
+    if (w.f > s) c = "fut";
+    else if (visClass(A, s, w.f) === 0) c = "gone";
+    else if (B && visClass(B, s, w.f) === 0) c = "onlyA";
+    if (i === nowIdx) c += " now";
+    if (c !== w.cls) { w.el.className = c; w.cls = c; }
+  });
+  let ct = -1;
+  cur.turns.forEach((t, i) => { if (t.f0 <= s) ct = i; });
+  if (ct !== cur.curTurn || force) {
+    cur.turns.forEach((t, i) => t.el.classList.toggle("cur", i === ct));
+    cur.curTurn = ct;
+    if (ct >= 0) {
+      const box = $("chat"), el = cur.turns[ct].el;
+      const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      box.scrollTo({ top: Math.max(0, el.offsetTop - box.clientHeight * 0.4), behavior: reduce || force ? "auto" : "smooth" });
+    }
+  }
+}
+
+const ROWS = { pad: 8, speech: 16, gap: 6, kv: 22, chart: 70 };
+function draw() {
+  const cv = $("tl"), dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth, labelW = Math.min(118, W * 0.22);
+  const nKv = cur.B ? 2 : 1;
+  const H = ROWS.pad * 2 + ROWS.speech * 2 + ROWS.gap * 5 + (ROWS.kv + 4) * nKv + ROWS.chart * 2 + 30;
+  cv.style.height = H + "px"; cv.width = W * dpr; cv.height = H * dpr;
+  const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+  const S = cur.S, x0 = labelW, pw = W - labelW - 4, X = f => x0 + f / S * pw, s = st.frame;
+  const fBody = `12px ${css("--f-body")}`, fMono = `11px ${css("--f-mono")}`;
+  g.font = fBody; g.textBaseline = "middle";
+  let y = ROWS.pad;
+  const label = (t, yy, color) => { g.fillStyle = color || css("--ink-3"); g.fillText(t, 0, yy); };
+  const band = (arr, color, hh) => {
+    g.fillStyle = css("--track"); g.fillRect(x0, y, pw, hh);
+    g.fillStyle = color;
+    for (let i = 0; i < S; i++) if (arr[i]) { let j = i; while (j < S && arr[j]) j++; g.fillRect(X(i), y, Math.max(X(j) - X(i), 1), hh); i = j; }
+  };
+  label("Moshi 발화", y + ROWS.speech / 2); band(cur.sp0, css("--speech"), ROWS.speech); y += ROWS.speech + ROWS.gap;
+  label("사용자 발화", y + ROWS.speech / 2); band(cur.sp1, css("--user"), ROWS.speech); y += ROWS.speech + ROWS.gap * 2;
+  const cols = [css("--evicted"), css("--sink"), css("--long"), css("--recent")];
+  for (const P of [cur.A, cur.B]) {
+    if (!P) continue;
+    label(`KV · ${P.kind}`, y + ROWS.kv / 2);
+    g.fillStyle = css("--k-" + P.kind); g.fillRect(x0 - 8, y + ROWS.kv / 2 - 3, 5, 6);
+    g.fillStyle = css("--track"); g.fillRect(x0, y, pw, ROWS.kv);
+    for (let px = 0; px < pw; px++) {
+      const f0 = Math.floor(px / pw * S), f1 = Math.max(f0 + 1, Math.floor((px + 1) / pw * S));
+      if (f0 > s) break;
+      let best = 0; for (let f = f0; f < Math.min(f1, s + 1); f++) { const v = visClass(P, s, f); if (v > best) best = v; }
+      g.fillStyle = cols[best]; g.fillRect(x0 + px, y, 1.05, ROWS.kv);
+    }
+    y += ROWS.kv + 4;
+  }
+  y += ROWS.gap * 2;
+  const panel = (key, name) => {
+    const top = y, h = ROWS.chart, arrs = [cur.A, cur.B].filter(Boolean).map(P => [P, P[key]]);
+    let mx = 0.5; for (const [, arr] of arrs) for (let i = 0; i < S; i++) mx = Math.max(mx, Math.abs(arr[i]));
+    mx = Math.min(Math.ceil(mx * 4) / 4, 4);
+    const Y = v => top + h / 2 - Math.max(-1, Math.min(1, v / mx)) * (h / 2 - 2);
+    g.fillStyle = css("--track"); g.fillRect(x0, top, pw, h);
+    g.strokeStyle = css("--line"); g.lineWidth = 1; g.setLineDash([]); g.beginPath(); g.moveTo(x0, Y(0)); g.lineTo(x0 + pw, Y(0)); g.stroke();
+    arrs.slice().reverse().forEach(([P, arr]) => {
+      g.strokeStyle = css("--k-" + P.kind); g.lineWidth = P === cur.A ? 2 : 1.5; g.setLineDash(P === cur.A ? [] : [4, 3]);
+      g.beginPath(); for (let i = 0; i < S; i++) { const xx = X(i), yy = Y(arr[i]); i ? g.lineTo(xx, yy) : g.moveTo(xx, yy); } g.stroke();
+    });
+    g.setLineDash([]);
+    label(name, top + 12); g.fillStyle = css("--ink-3"); g.font = fMono;
+    g.fillText(`+${mx}`, x0 + pw - 30, top + 9); g.fillText(`−${mx}`, x0 + pw - 30, top + h - 8);
+    g.font = fBody;
+    y += h + ROWS.gap;
+  };
+  panel("dt", "Δ 텍스트 NLL");
+  panel("dc", "Δ 음성 cb0 NLL");
+  g.fillStyle = css("--ink-3"); g.font = fMono;
+  const total = S / FR, tickS = total > 120 ? 30 : 15;
+  for (let t = 0; t <= total; t += tickS) { const xx = X(t * FR); g.fillText(fmtT(t).replace(".0", ""), Math.min(xx, x0 + pw - 30), y + 8); }
+  g.strokeStyle = css("--ink"); g.lineWidth = 1.5; g.beginPath(); g.moveTo(X(s), ROWS.pad - 4); g.lineTo(X(s), y - 2); g.stroke();
+  cur.geom = { x0, pw };
+}
+
+function seekFrame(f) {
+  st.frame = Math.max(0, Math.min(cur.S - 1, Math.round(f)));
+  const a = $("audio"); if (a.readyState > 0) a.currentTime = st.frame / FR;
+  draw(); stats(); updateChat();
+}
+
+function tick() {
+  const a = $("audio");
+  if (!a.paused) { const f = Math.min(cur.S - 1, Math.floor(a.currentTime * FR)); if (f !== st.frame) { st.frame = f; draw(); stats(); updateChat(); } }
+  requestAnimationFrame(tick);
+}
+
+// ---------- findings ----------
+const HEAD = [
+  { h: "H1", claim: "메모리를 줄이면 품질이 떨어진다", sub: "B1 62MB − 전체 context · 텍스트 · 침묵 60%", fam: "H1", contrast: "B1@125 - full", metric: "text", ratio: "0.6", expect: 1 },
+  { h: "H2", claim: "같은 메모리에서 침묵 인식이 텍스트 기억을 더 잘 지킨다", sub: "P1W − B1 · 62MB · 텍스트 · 침묵 60%", fam: "H2", contrast: "P1W@125 - B1@125", metric: "text", ratio: "0.6", expect: -1 },
+  { h: "H2", claim: "음성 토큰(cb0) 예측도 지킨다", sub: "P1W − B1 · 62MB · cb0 · 침묵 60%", fam: "H2", contrast: "P1W@125 - B1@125", metric: "cb0", ratio: "0.6", expect: -1 },
+  { h: "H3", claim: "침묵이 많을수록 침묵 인식의 이득이 커진다", sub: "(B1 − P1W) 이득: 침묵 60% − 20% · 62MB · 텍스트", fam: "H3", contrast: "gain@0.6 - gain@0.2  (gain = B1@125 - P1W@125)", metric: "text", ratio: "0.6 vs 0.2", expect: 1 },
+  { h: "H4a", claim: "KV int8은 품질을 바꾸지 않는다", sub: "int8 − bf16 · 전체 context · 텍스트 · 침묵 60% · 허용 ±0.01", eq: true, metric: "text", ratio: 0.6 },
+  { h: "H4b", claim: "int8과 결합하면 같은 메모리에서 더 낫다", sub: "P2 − B2 · 62MB · 텍스트 · 침묵 60%", fam: "H4b", contrast: "P2@125 - B2@125", metric: "text", ratio: "0.6", expect: -1 },
+];
+function findCell(H, row) {
+  if (!H) return `<span class="pill na">아직 평가 전</span>`;
+  if (row.eq) {
+    const e = H.equivalence.find(x => x.metric === row.metric && Math.abs(x.ratio - row.ratio) < 1e-6);
+    if (!e) return "–";
+    return `<div class="val">${sign(e.mean_diff)} [${sign(e.ci90_lo)}, ${sign(e.ci90_hi)}]</div>` +
+      (e.equivalent ? `<span class="pill ok">✓ 동등</span>` : `<span class="pill na">동등 확인 안 됨</span>`);
+  }
+  const t = H.tests.find(x => x.family === row.fam && x.contrast === row.contrast && x.metric === row.metric && String(x.ratio) === row.ratio);
+  if (!t) return "–";
+  const sig = t.significant === true || t.significant === "True";
+  const right = Math.sign(t.mean_diff) === row.expect;
+  const pill = !sig ? `<span class="pill na">유의하지 않음</span>` : right ? `<span class="pill ok">✓ 지지</span>` : `<span class="pill bad">✗ 반대 방향</span>`;
+  const p = t.p_holm < 0.001 ? "p<0.001" : `p=${t.p_holm.toFixed(3)}`;
+  return `<div class="val">${sign(t.mean_diff)} [${sign(t.ci95_lo)}, ${sign(t.ci95_hi)}]</div><div class="sub">${p} · dz ${t.dz.toFixed(2)}</div>${pill}`;
+}
+function renderFindings() {
+  const Hs = D.hypotheses || {}, dev = Hs.dev, test = Hs.test;
+  let h = `<thead><tr><th>가설</th><th>dev${dev ? ` (n=${dev.n})` : ""}</th><th>test${test ? ` (n=${test.n})` : ""}</th></tr></thead><tbody>`;
+  for (const r of HEAD) h += `<tr><td><div class="h">${r.h}</div><div class="claim">${r.claim}</div><div class="sub">${r.sub}</div></td><td>${findCell(dev, r)}</td><td>${findCell(test, r)}</td></tr>`;
+  h += `<tr><td><div class="h">H5</div><div class="claim">실시간 마감을 지키며 동시 세션 2배 이상</div><div class="sub">3090 실제 서빙 측정 필요</div></td><td colspan="2"><span class="pill na">미측정</span></td></tr>`;
+  $("find").innerHTML = h + "</tbody>";
+}
+
+// ---------- results chart ----------
+function renderResults() {
+  const svg = $("chart"), Wd = 640, Hd = 380, m = { l: 52, r: 16, t: 14, b: 44 };
+  const rows = D.table.filter(r => Math.abs(r.ratio - st.ratio2) < 1e-6 && r.kind !== "full");
+  const met = st.metric;
+  const kinds = KIND_ORDER.filter(k => st.shown.has(k));
+  const vals = rows.filter(r => st.shown.has(r.kind)).flatMap(r => [r[met + "_lo"], r[met + "_hi"]]);
+  let ymax = Math.max(0.1, ...vals), ymin = Math.min(-0.02, ...vals);
+  const nice = v => { const p = Math.pow(10, Math.floor(Math.log10(v))); return Math.ceil(v / p * 2) / 2 * p; };
+  ymax = nice(ymax);
+  const X = b => m.l + (Math.log2(b) - Math.log2(125)) / 3 * (Wd - m.l - m.r);
+  const Y = v => m.t + (ymax - v) / (ymax - ymin) * (Hd - m.t - m.b);
+  const ink3 = css("--ink-3"), line = css("--line");
+  let h = "";
+  const nt = 5;
+  for (let i = 0; i <= nt; i++) {
+    const v = ymin + (ymax - ymin) * i / nt;
+    h += `<line x1="${m.l}" x2="${Wd - m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="${line}" stroke-width="1"/>`;
+    h += `<text x="${m.l - 8}" y="${Y(v) + 4}" text-anchor="end" font-size="11" fill="${ink3}" font-family="${css("--f-mono")}">${v.toFixed(ymax >= 1 ? 1 : 2)}</text>`;
+  }
+  h += `<line x1="${m.l}" x2="${Wd - m.r}" y1="${Y(0)}" y2="${Y(0)}" stroke="${ink3}" stroke-width="1"/>`;
+  for (const b of BUDGETS) {
+    h += `<text x="${X(b)}" y="${Hd - m.b + 18}" text-anchor="middle" font-size="11" fill="${ink3}" font-family="${css("--f-mono")}">${b / 2}MB</text>`;
+  }
+  h += `<text x="${(m.l + Wd - m.r) / 2}" y="${Hd - 6}" text-anchor="middle" font-size="12" fill="${ink3}">세션당 KV 메모리 (로그 축)</text>`;
+  const pts = [];
+  for (const k of kinds) {
+    const g = rows.filter(r => r.kind === k).sort((a, b) => a.budget - b.budget);
+    if (!g.length) continue;
+    const c = css("--k-" + k);
+    const bx = r => X(Math.round(r.budget / 125) * 125 || r.budget);
+    const area = g.map(r => `${bx(r)},${Y(Math.min(r[met + "_hi"], ymax))}`).join(" ") + " " + g.slice().reverse().map(r => `${bx(r)},${Y(Math.max(r[met + "_lo"], ymin))}`).join(" ");
+    h += `<polygon points="${area}" fill="${c}" fill-opacity="0.12"/>`;
+    h += `<polyline points="${g.map(r => `${bx(r)},${Y(Math.min(r[met], ymax))}`).join(" ")}" fill="none" stroke="${c}" stroke-width="2"/>`;
+    for (const r of g) {
+      const clipped = r[met] > ymax;
+      h += `<circle cx="${bx(r)}" cy="${Y(Math.min(r[met], ymax))}" r="4.5" fill="${c}" stroke="${css("--panel")}" stroke-width="2"/>`;
+      pts.push({ x: bx(r), y: Y(Math.min(r[met], ymax)), r, k, clipped });
+    }
+    const last = g[g.length - 1];
+  }
+  svg.innerHTML = h + `<rect x="${m.l}" y="${m.t}" width="${Wd - m.l - m.r}" height="${Hd - m.t - m.b}" fill="transparent" id="hit"/>`;
+  const tip = $("tip"), wrap = $("chartwrap");
+  const hit = svg.querySelector("#hit");
+  const move = ev => {
+    const rc = svg.getBoundingClientRect(), sx = (ev.clientX - rc.left) / rc.width * Wd, sy = (ev.clientY - rc.top) / rc.height * Hd;
+    let best = null, bd = 1e9; for (const p of pts) { const d = Math.hypot(p.x - sx, p.y - sy); if (d < bd) { bd = d; best = p; } }
+    if (!best || bd > 40) { tip.hidden = true; return; }
+    const r = best.r;
+    tip.innerHTML = `<b>${KINDS[best.k].name}</b><br>${r.kv_mb.toFixed(0)}MB · 3090 ${r.sessions_3090}세션<br>Δ텍스트 <span class="mono">${r.d_text_nll_content >= 0 ? "+" : ""}${r.d_text_nll_content.toFixed(3)}</span> · Δcb0 <span class="mono">${r.d_cb0_nll >= 0 ? "+" : ""}${r.d_cb0_nll.toFixed(3)}</span><br><span style="color:var(--ink-3)">95% CI ${r[met + "_lo"].toFixed(3)} ~ ${r[met + "_hi"].toFixed(3)} · n=${r.n}</span>`;
+    tip.hidden = false;
+    const px = best.x / Wd * rc.width, py = best.y / Hd * rc.height;
+    tip.style.left = Math.min(px + 12, rc.width - tip.offsetWidth - 4) + "px"; tip.style.top = Math.max(0, py - tip.offsetHeight - 10) + "px";
+  };
+  hit.onpointermove = move; hit.onpointerleave = () => tip.hidden = true;
+  const clipped = pts.filter(p => p.clipped).length;
+  $("resnote").textContent = `대화 ${D.n_dialogs}개, 침묵 ${Math.round(st.ratio2 * 100)}%. 음영은 대화 단위 bootstrap 95% CI입니다. 점에 마우스를 올리면 값이 보입니다. B0와 P1은 sink가 없어 값이 매우 크기(최대 +6) 때문에 기본으로 숨겨 두었습니다.` + (clipped ? ` 위쪽 끝에 붙은 점 ${clipped}개는 축 범위를 넘는 값입니다.` : "");
+
+  // capacity table
+  const cap = {};
+  for (const r of D.table) {
+    if (r.kind === "full") continue;
+    if (r.d_text_nll_content_hi <= 0.05 && r.d_cb0_nll_hi <= 0.05) {
+      const key = r.kind + "|" + r.ratio; cap[key] = Math.max(cap[key] || 0, r.sessions_3090);
+    }
+  }
+  const rs = [0.2, 0.4, 0.6];
+  const best = rs.map(x => Math.max(...KIND_ORDER.map(k => cap[k + "|" + x] || 0)));
+  let t = `<thead><tr><th>정책</th>${rs.map(x => `<th>침묵 ${x * 100}%</th>`).join("")}</tr></thead><tbody>`;
+  t += `<tr><td>전체 context</td>${rs.map(() => `<td>4</td>`).join("")}</tr>`;
+  for (const k of KIND_ORDER) t += `<tr><td><i class="dot" style="background:var(--k-${k});margin-right:6px"></i>${k}</td>${rs.map((x, i) => { const v = cap[k + "|" + x] || 0; return `<td class="${v === best[i] && v ? "best" : ""}">${v || "–"}</td>`; }).join("")}</tr>`;
+  $("cap").innerHTML = t + "</tbody>";
+}
+
+function setup() {
+  $("dlg").innerHTML = D.dialogs.map((d, i) => `<option value="${i}">대화 #${d.id} · ${(d.ratios["r0.2"].S / FR).toFixed(0)}~${(d.ratios["r0.6"].S / FR).toFixed(0)}초</option>`).join("");
+  if (st.dlg >= D.dialogs.length) st.dlg = 0;
+  $("dlg").value = st.dlg;
+  $("dlg").onchange = e => { st.dlg = +e.target.value; save(); prepare(); };
+  segButtons($("ratio"), RATIOS.map(r => [r, Math.round(parseFloat(r.slice(1)) * 100) + "%"]), () => st.ratio, v => { st.ratio = v; prepare(); });
+  segButtons($("budget"), BUDGETS.map(b => [b, `${b / 2}MB`]), () => st.budget, v => { st.budget = v; prepare(); });
+  segButtons($("policy"), KIND_ORDER.map(k => [k, k, "--k-" + k]), () => st.kind, v => { st.kind = v; prepare(); });
+  segButtons($("cmp"), [["none", "없음"]].concat(KIND_ORDER.map(k => [k, k, "--k-" + k])), () => st.cmp, v => { st.cmp = v; prepare(); });
+  segButtons($("metric"), [["d_text_nll_content", "Δ 텍스트 NLL"], ["d_cb0_nll", "Δ 음성 cb0 NLL"]], () => st.metric, v => { st.metric = v; renderResults(); });
+  segButtons($("ratio2"), [[0.2, "20%"], [0.4, "40%"], [0.6, "60%"]], () => st.ratio2, v => { st.ratio2 = v; renderResults(); });
+  const chips = $("chips"); chips.innerHTML = "";
+  for (const k of KIND_ORDER) {
+    const b = document.createElement("button"); b.type = "button"; b.className = "chip";
+    b.innerHTML = `<i class="dot" style="background:var(--k-${k})"></i>${KINDS[k].name}`;
+    b.setAttribute("aria-pressed", String(st.shown.has(k)));
+    b.onclick = () => { st.shown.has(k) ? st.shown.delete(k) : st.shown.add(k); b.setAttribute("aria-pressed", String(st.shown.has(k))); save(); renderResults(); };
+    chips.appendChild(b);
+  }
+  $("defs").innerHTML = KIND_ORDER.map(k => `<div><dt><i class="dot" style="background:var(--k-${k})"></i>${KINDS[k].name}</dt><dd>${KINDS[k].desc}</dd></div>`).join("");
+  const a = $("audio"), pb = $("play");
+  pb.onclick = () => { if (a.paused) { a.currentTime = st.frame / FR; a.play().catch(() => {}); } else a.pause(); };
+  a.onplay = () => pb.textContent = "❚❚ 일시정지";
+  a.onpause = a.onended = () => pb.textContent = "▶ 재생";
+  const cv = $("tl");
+  const pick = ev => { const r = cv.getBoundingClientRect(), x = ev.clientX - r.left; if (cur.geom && x >= cur.geom.x0) seekFrame((x - cur.geom.x0) / cur.geom.pw * cur.S); };
+  let dragging = false;
+  cv.onpointerdown = ev => { dragging = true; cv.setPointerCapture(ev.pointerId); pick(ev); };
+  cv.onpointermove = ev => { if (dragging) pick(ev); };
+  cv.onpointerup = () => dragging = false;
+  cv.onkeydown = ev => { if (ev.key === "ArrowRight") { seekFrame(st.frame + FR); ev.preventDefault(); } if (ev.key === "ArrowLeft") { seekFrame(st.frame - FR); ev.preventDefault(); } if (ev.key === " ") { pb.click(); ev.preventDefault(); } };
+  window.addEventListener("resize", () => { draw(); });
+  const redraw = () => { buildChat(); updateChat(true); draw(); renderResults(); };
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", redraw);
+  new MutationObserver(redraw).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+}
+
+fetch("../api/experiments").then(r => { if (r.ok) $("consolelink").hidden = false; }).catch(() => {});
+fetch("data.json").then(r => r.json()).then(d => {
+  D = d; setup(); renderFindings(); prepare();
+  seekFrame(Math.floor(cur.S * 0.55)); updateChat(true);
+  renderResults(); requestAnimationFrame(tick);
+}).catch(() => { $("stats").innerHTML = `<p class="loading">data.json을 불러오지 못했습니다. 페이지를 새로고침해 주세요.</p>`; });
+</script>
+</body>
+</html>

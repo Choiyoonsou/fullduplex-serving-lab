@@ -1,0 +1,12 @@
+{
+  "dev": {
+    "n": 100,
+    "sha256": "44c2961773a4de06"
+  },
+  "test": {
+    "n": 100,
+    "sha256": "199556560dbcba63"
+  },
+  "rule": "dev = 100 longest DailyTalkContiguous dialogs (69-103s; used for all tuning incl. P1W window, hang, sink). test = next 100 longest (57-69s), never inspected before the frozen evaluation.",
+  "frozen": "2026-11-10"
+}

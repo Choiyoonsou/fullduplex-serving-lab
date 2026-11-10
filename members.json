@@ -1,0 +1,8 @@
+{
+  "_comment": "실험 인원. id는 runs/<id>/ 폴더 이름. gpu_pairs는 GPU_PAIRS를 따로 안 주면 쓰는 기본 GPU (6xT4 서버에서 겹치지 않게 분배).",
+  "members": {
+    "sgkwon": {"name": "권숭구", "gpu_pairs": "0,1"},
+    "jmkim":  {"name": "김정민", "gpu_pairs": "2,3"},
+    "yschoi": {"name": "최윤수", "gpu_pairs": "4,5"}
+  }
+}

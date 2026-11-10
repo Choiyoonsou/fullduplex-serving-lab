@@ -1,0 +1,2 @@
+# only for scripts/05_export_demo.py (user-channel transcript in the demo chat view)
+faster-whisper==1.1.1

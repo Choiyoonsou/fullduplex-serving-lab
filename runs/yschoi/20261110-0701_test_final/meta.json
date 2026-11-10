@@ -1,0 +1,21 @@
+{
+  "member": "yschoi",
+  "name": "최윤수",
+  "tag": "final",
+  "note": "frozen eval: P1W recent=budget/4, hang=1, sink=4; tuned on dev only",
+  "split": "test",
+  "started": "2026-11-10T07:01:09",
+  "finished": null,
+  "status": "running",
+  "host": "ift02",
+  "gpu_pairs": "0,1 2,3 4,5",
+  "n_dialogs": 100,
+  "ratios": [
+    0.2,
+    0.4,
+    0.6
+  ],
+  "nll_args": [],
+  "git_commit": null,
+  "git_dirty": true
+}

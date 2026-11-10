@@ -1,0 +1,587 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Full-duplex 실험 콘솔</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: lab console. Sticky top bar (status + GPU strip + tabs), then one working area per tab. */
+:root {
+  --bg: #f3f5f8; --panel: #ffffff; --ink: #18202b; --ink-2: #4a5566; --ink-3: #7b8595;
+  --line: #dde1e8; --track: #eceff3; --accent: #2a78d6; --accent-ink: #ffffff;
+  --ok: #23824f; --warn: #a15c00; --bad: #c2410c; --run: #2a78d6; --na: #7b8595;
+  --gA: #1baf7a; --gB: #eda100; --gC: #e87ba4;
+  --f-body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12151a; --panel: #1a1e25; --ink: #eef0f3; --ink-2: #b9c0cb; --ink-3: #8790a0;
+    --line: #2c323c; --track: #232831; --accent: #3987e5; --accent-ink: #ffffff;
+    --ok: #4cbb7f; --warn: #e0a243; --bad: #f08a5d; --run: #5aa0ee; --na: #8790a0;
+    --gA: #199e70; --gB: #c98500; --gC: #d55181; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12151a; --panel: #1a1e25; --ink: #eef0f3; --ink-2: #b9c0cb; --ink-3: #8790a0;
+  --line: #2c323c; --track: #232831; --accent: #3987e5; --accent-ink: #ffffff;
+  --ok: #4cbb7f; --warn: #e0a243; --bad: #f08a5d; --run: #5aa0ee; --na: #8790a0;
+  --gA: #199e70; --gB: #c98500; --gC: #d55181; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { color-scheme: light; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 14px; line-height: 1.5; }
+[hidden] { display: none !important; }
+a { color: var(--accent); }
+.gut { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.inner { max-width: 1280px; margin: 0 auto; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--panel); }
+.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--panel); border-bottom: 1px solid var(--line); }
+.top .inner { display: grid; gap: 10px; padding-block: 12px 0; }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.bar h1 { font-size: 18px; margin: 0; font-weight: 700; letter-spacing: -0.01em; }
+.bar .sp { flex: 1; }
+.conn { font-size: 12px; display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); }
+.conn i { width: 8px; height: 8px; border-radius: 50%; background: var(--na); display: inline-block; }
+.conn.on i { background: var(--ok); } .conn.off i { background: var(--bad); }
+.gpus { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px; }
+.gpu { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; display: grid; gap: 3px; min-width: 0; font-size: 12px; }
+.gpu .row1 { display: flex; justify-content: space-between; gap: 6px; }
+.gpu .nm { font-family: var(--f-mono); font-weight: 500; }
+.gpu .who { color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meter { height: 5px; background: var(--track); border-radius: 3px; overflow: hidden; }
+.meter i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.gpu.free .meter i { background: var(--ok); }
+.gpu.ext .meter i { background: var(--warn); }
+.tabs { display: flex; gap: 2px; overflow-x: auto; }
+.tabs a { text-decoration: none; color: var(--ink-2); padding: 8px 14px; border-bottom: 2px solid transparent; font-weight: 500; white-space: nowrap; }
+.tabs a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--accent); }
+.tabs .cnt { font-family: var(--f-mono); font-size: 11px; background: var(--track); border-radius: 999px; padding: 0 6px; margin-left: 4px; color: var(--ink-2); }
+main .inner { padding-block: 18px 60px; display: grid; gap: 16px; }
+.banner { border: 1px solid var(--warn); color: var(--ink); background: color-mix(in srgb, var(--warn) 10%, var(--panel)); border-radius: 8px; padding: 10px 12px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 12px; min-width: 0; align-content: start; }
+h2 { font-size: 16px; margin: 0; font-weight: 600; text-wrap: balance; }
+h3 { font-size: 14px; margin: 0; font-weight: 600; }
+.muted { color: var(--ink-3); }
+.small { font-size: 12px; }
+.mono { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+.split2 { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 900px) { .split2 { grid-template-columns: 1fr; } }
+/* catalog */
+.cat { display: grid; gap: 14px; }
+.cat h3 { display: flex; align-items: center; gap: 8px; }
+.gdot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.cat .gdesc { font-size: 12px; color: var(--ink-3); margin: 2px 0 6px; }
+.item { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; width: 100%; text-align: left; font: inherit; color: inherit; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 7px 9px; cursor: pointer; }
+.item:hover { background: var(--track); }
+.item[aria-current="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
+.item .t { font-weight: 500; }
+.item .c { grid-column: 1 / -1; font-size: 12px; color: var(--ink-3); }
+.badge { font-size: 11px; font-weight: 600; border-radius: 999px; padding: 0 8px; border: 1px solid currentColor; white-space: nowrap; align-self: start; }
+.badge.ready { color: var(--ok); } .badge.planned { color: var(--warn); } .badge.serving { color: var(--warn); } .badge.model { color: var(--na); }
+.badge.queued { color: var(--na); } .badge.running { color: var(--run); } .badge.done { color: var(--ok); }
+.badge.failed, .badge.lost { color: var(--bad); } .badge.cancelled { color: var(--na); }
+.badge.dev { color: var(--ink-2); } .badge.test { color: var(--bad); }
+/* detail + form */
+.q { font-size: 15px; color: var(--ink); max-width: 75ch; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font: inherit; font-size: 13px; border: 1px solid var(--line); background: var(--panel); color: var(--ink-2); border-radius: 999px; padding: 3px 11px; cursor: pointer; font-variant-numeric: tabular-nums; }
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+.chip:disabled { cursor: default; opacity: .55; }
+.tagline { display: flex; flex-wrap: wrap; gap: 6px; }
+.tagline span { font-size: 12px; background: var(--track); border-radius: 6px; padding: 2px 8px; color: var(--ink-2); }
+.form { display: grid; gap: 14px; }
+.fs { border: 1px solid var(--line); border-radius: 8px; padding: 12px; display: grid; gap: 12px; margin: 0; min-width: 0; }
+.fs legend { font-size: 12px; color: var(--ink-3); padding: 0 4px; letter-spacing: .04em; text-transform: uppercase; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 16px; }
+.field { display: grid; gap: 5px; min-width: 0; }
+.field > label, .field > .lb { font-size: 13px; font-weight: 500; }
+.field .help { font-size: 12px; color: var(--ink-3); }
+input[type=text], input[type=number], select, textarea { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 6px 9px; width: 100%; min-width: 0; }
+textarea { resize: vertical; min-height: 54px; }
+input[type=range] { width: 100%; }
+.inline { display: flex; align-items: center; gap: 8px; }
+.inline input[type=number] { width: 90px; }
+.check { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; }
+.check input { margin-top: 3px; }
+.warnbox { border-left: 3px solid var(--bad); padding: 8px 10px; background: color-mix(in srgb, var(--bad) 7%, var(--panel)); border-radius: 0 6px 6px 0; font-size: 13px; }
+.preview { display: grid; gap: 8px; border-radius: 8px; padding: 12px; background: var(--track); }
+.est { display: flex; flex-wrap: wrap; gap: 6px 22px; }
+.est div { display: grid; }
+.est .k { font-size: 11px; color: var(--ink-3); }
+.est .v { font-family: var(--f-mono); font-size: 18px; font-weight: 500; font-variant-numeric: tabular-nums; }
+pre.cmd { margin: 0; font-family: var(--f-mono); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.btn { font: inherit; font-weight: 600; border-radius: 7px; padding: 7px 14px; cursor: pointer; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.danger { color: var(--bad); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn.sm { padding: 3px 9px; font-size: 12px; font-weight: 500; }
+.err { color: var(--bad); font-size: 13px; }
+.needs { margin: 0; padding-left: 18px; color: var(--ink-2); }
+/* tables */
+.tbox { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 500; color: var(--ink-3); font-size: 12px; white-space: nowrap; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--f-mono); }
+tr.sel td { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+tr.click { cursor: pointer; }
+tr.click:hover td { background: var(--track); }
+.pbar { display: grid; gap: 3px; min-width: 140px; }
+.pbar .meter { height: 6px; }
+.sig { font-weight: 700; }
+.pos { color: var(--bad); } .neg { color: var(--ok); }
+.log { font-family: var(--f-mono); font-size: 12px; background: #0f1318; color: #d6dde6; border-radius: 8px; padding: 10px 12px; height: 340px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+.kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 6px 16px; font-size: 13px; }
+.kv div { display: grid; min-width: 0; }
+.kv .k { font-size: 11px; color: var(--ink-3); }
+.kv .v { overflow-wrap: anywhere; }
+.figs { display: grid; gap: 10px; }
+.figs img { max-width: 100%; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+.toast { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); background: var(--ink); color: var(--panel); border-radius: 8px; padding: 10px 14px; z-index: 20; max-width: min(420px, calc(100vw - 32px)); }
+.filters { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: end; }
+.filters .field { min-width: 140px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<header class="top gut">
+  <div class="inner">
+    <div class="bar">
+      <h1>fullduplex-serving-lab · 실험 콘솔</h1>
+      <span class="conn" id="conn"><i></i><span>연결 확인 중</span></span>
+      <span class="sp"></span>
+      <a href="sim/">정책 시뮬레이터 →</a>
+    </div>
+    <div class="gpus" id="gpus" aria-label="GPU 상태"></div>
+    <nav class="tabs" aria-label="화면">
+      <a href="#exp" data-tab="exp">실험</a>
+      <a href="#queue" data-tab="queue">작업 큐<span class="cnt" id="qcount">0</span></a>
+      <a href="#runs" data-tab="runs">결과<span class="cnt" id="rcount">0</span></a>
+    </nav>
+  </div>
+</header>
+
+<main class="gut">
+  <div class="inner">
+    <div class="banner" id="ro" hidden>읽기 전용 모드입니다. 실험 실행과 결과 조회는 GPU 서버에서 <span class="mono">scripts/serve_console.sh</span>로 콘솔을 띄웠을 때만 됩니다. 원격 서버라면 <span class="mono">ssh -L 8800:localhost:8800 &lt;서버&gt;</span>로 연결하세요.</div>
+
+    <!-- ============ 실험 ============ -->
+    <section id="tab-exp" class="split2">
+      <nav class="panel cat" id="catalog" aria-label="실험 카탈로그"></nav>
+      <div class="panel" id="detail"></div>
+    </section>
+
+    <!-- ============ 작업 큐 ============ -->
+    <section id="tab-queue" hidden>
+      <div class="panel">
+        <div class="bar"><h2>작업 큐</h2><span class="muted small">빈 GPU 쌍이 생기면 위에서부터 순서대로 시작합니다. GPU 메모리를 1.5GB 넘게 쓰는 GPU는 콘솔 밖에서 쓰는 중으로 보고 피합니다.</span></div>
+        <div class="tbox"><table id="jobs"></table></div>
+      </div>
+      <div class="panel" id="logpanel" hidden>
+        <div class="bar"><h2 id="logtitle">로그</h2><span class="sp"></span><div class="chips" id="logfiles"></div></div>
+        <pre class="log" id="log" tabindex="0"></pre>
+      </div>
+    </section>
+
+    <!-- ============ 결과 ============ -->
+    <section id="tab-runs" hidden>
+      <div class="panel">
+        <div class="bar"><h2>실험 결과</h2><span class="sp"></span><button class="btn sm" id="cmpbtn" type="button" disabled>선택한 run 비교</button></div>
+        <div class="filters">
+          <div class="field"><label for="f-member">담당자</label><select id="f-member"></select></div>
+          <div class="field"><label for="f-exp">실험</label><select id="f-exp"></select></div>
+          <div class="field"><label for="f-split">split</label><select id="f-split"><option value="">전체</option><option>dev</option><option>test</option></select></div>
+        </div>
+        <div class="tbox"><table id="runs"></table></div>
+      </div>
+      <div class="panel" id="cmppanel" hidden></div>
+      <div class="panel" id="rundetail" hidden></div>
+    </section>
+  </div>
+</main>
+<div class="toast" id="toast" hidden role="status"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const STATUS = { ready: "실행 가능", planned: "기능 추가 필요", serving: "서빙 하네스 필요", model: "모델·데이터 필요" };
+const JOB = { queued: "대기", running: "실행 중", done: "완료", failed: "실패", cancelled: "취소", lost: "추적 끊김" };
+const METRICS = [["text_nll_content", "텍스트(내용)"], ["cb0_nll", "음성 cb0"], ["text_nll_onset", "턴 시작"], ["text_nll_epad", "말 시작 결정(EPAD)"], ["text_nll_listen", "듣는 중 침묵 유지"]];
+const fmtDur = s => { s = Math.max(0, Math.round(s)); const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60); return h ? `${h}시간 ${m}분` : `${m}분`; };
+const fmtTime = t => t ? t.replace("T", " ").slice(5, 16) : "–";
+const sgn = v => (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(3);
+let REG = null, STATE = null, RUNS = [], online = false, sel = null, form = null, logJob = null, logFile = "console", detailRun = null;
+const cmpSel = new Set();
+
+function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => t.hidden = true, 3500); }
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+const post = (p, body) => api(p, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
+// ---------------- tabs (hash routing) ----------------
+function route() {
+  const tab = (location.hash || "#exp").slice(1);
+  const t = ["exp", "queue", "runs"].includes(tab) ? tab : "exp";
+  for (const x of ["exp", "queue", "runs"]) $("tab-" + x).hidden = x !== t;
+  document.querySelectorAll(".tabs a").forEach(a => { if (a.dataset.tab === t) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
+  if (t === "runs") loadRuns();
+}
+window.addEventListener("hashchange", route);
+
+// ---------------- GPU strip ----------------
+function renderGpus() {
+  const el = $("gpus");
+  if (!STATE || !STATE.gpus.length) { el.innerHTML = `<div class="muted small">${online ? "GPU 정보를 읽지 못했습니다(nvidia-smi)." : "서버에 연결되지 않아 GPU 상태를 볼 수 없습니다."}</div>`; return; }
+  const jobsById = Object.fromEntries(STATE.jobs.map(j => [j.id, j]));
+  el.innerHTML = STATE.gpus.map(g => {
+    const pct = Math.round(100 * g.mem_used / g.mem_total), j = g.job && jobsById[g.job];
+    const cls = j ? "" : (g.mem_used < 1500 ? "free" : "ext");
+    const who = j ? `${esc(j.member)} · ${esc(j.tag)}` : (g.mem_used < 1500 ? "비어 있음" : "콘솔 밖 사용 중");
+    return `<div class="gpu ${cls}"><div class="row1"><span class="nm">GPU ${g.index}</span><span class="mono muted">${(g.mem_used / 1024).toFixed(1)}/${(g.mem_total / 1024).toFixed(0)}GB · ${g.util}%</span></div>` +
+      `<div class="meter"><i style="width:${pct}%"></i></div><div class="who">${who}</div></div>`;
+  }).join("");
+}
+
+// ---------------- catalog ----------------
+function renderCatalog() {
+  const groups = REG.groups, exps = REG.experiments;
+  $("catalog").innerHTML = Object.entries(groups).map(([g, info]) => {
+    const items = exps.filter(e => e.group === g);
+    return `<div><h3><i class="gdot" style="background:var(--g${g})"></i>${g}. ${esc(info.title)}</h3><p class="gdesc">${esc(info.desc)}</p>` +
+      items.map(e => `<button type="button" class="item" data-id="${e.id}" aria-current="${sel === e.id}"><span class="t">${esc(e.title)}</span>` +
+        `<span class="badge ${e.status}">${STATUS[e.status]}</span><span class="c">계획서 후보: ${esc(e.candidate)}</span></button>`).join("") + `</div>`;
+  }).join("");
+  $("catalog").querySelectorAll(".item").forEach(b => b.onclick = () => selectExp(b.dataset.id));
+}
+
+function selectExp(id) {
+  sel = id;
+  try { localStorage.setItem("fdkv-exp", id); } catch (e) {}
+  $("catalog").querySelectorAll(".item").forEach(b => b.setAttribute("aria-current", String(b.dataset.id === id)));
+  const e = REG.experiments.find(x => x.id === id);
+  if (e.status === "ready") initForm(e);
+  renderDetail(e);
+}
+
+function defaultMember() {
+  try { const m = localStorage.getItem("fdkv-member"); if (m) return m; } catch (e) {}
+  return STATE ? Object.keys(STATE.members)[0] : "";
+}
+function initForm(e) {
+  const params = {};
+  for (const p of e.params) params[p.key] = Array.isArray(p.default) ? [...p.default] : p.default;
+  form = { exp: e.id, member: defaultMember(), tag: e.id.replace(/_/g, "-"), note: "", split: "dev", confirm_test: false,
+           n_dialogs: 100, ratios: [0.2, 0.4, 0.6], n_pairs: 0, skip_verify: true, params };
+}
+
+function chipGroup(id, options, labels, values, disabled) {
+  return `<div class="chips" id="${id}">` + options.map((o, i) =>
+    `<button type="button" class="chip" data-v="${esc(o)}" aria-pressed="${values.map(String).includes(String(o))}" ${disabled ? "disabled" : ""}>${esc(labels ? labels[i] : o)}</button>`).join("") + `</div>`;
+}
+
+function renderDetail(e) {
+  const head = `<div class="bar"><h2>${esc(e.title)}</h2><span class="badge ${e.status}">${STATUS[e.status]}</span></div>
+    <p class="q">${esc(e.question)}</p>
+    <div class="tagline">${(e.metrics || []).map(m => `<span>${esc(m)}</span>`).join("")}</div>
+    ${e.note ? `<p class="muted small" style="margin:0">${esc(e.note)}</p>` : ""}`;
+  if (e.status !== "ready") {
+    $("detail").innerHTML = head + `<h3>실행하려면 필요한 것</h3><ul class="needs">${(e.needs || []).map(n => `<li>${esc(n)}</li>`).join("")}</ul>` +
+      (e.preview ? `<h3>예정된 설정 항목</h3>${chipGroup("pv", e.preview, null, [], true)}` : "") +
+      `<p class="muted small" style="margin:0">${e.group === "B" ? "B 그룹은 다중 세션 서빙 하네스 하나로 함께 열립니다. 하네스가 생기면 이 카드가 실행 가능으로 바뀝니다." : "이 주제는 현재 모델과 데이터 범위 밖이라 별도 준비가 필요합니다."}</p>`;
+    return;
+  }
+  const f = form, members = STATE ? STATE.members : {};
+  const pairsN = STATE ? STATE.pairs.length : 3;
+  const pv = e.params.map(p => {
+    let ctl = "";
+    if (p.type === "multi") ctl = chipGroup("p-" + p.key, p.options, p.labels, f.params[p.key]);
+    else if (p.type === "int") ctl = `<div class="inline"><input type="range" id="p-${p.key}-r" min="${p.min}" max="${p.max}" value="${f.params[p.key]}"><input type="number" id="p-${p.key}" min="${p.min}" max="${p.max}" value="${f.params[p.key]}"></div>`;
+    else ctl = `<label class="check"><input type="checkbox" id="p-${p.key}" ${f.params[p.key] ? "checked" : ""}> 사용</label>`;
+    return `<div class="field"><span class="lb">${esc(p.label)}</span>${ctl}${p.help ? `<span class="help">${esc(p.help)}</span>` : ""}</div>`;
+  }).join("");
+  $("detail").innerHTML = head + `
+    <form class="form" id="expform" novalidate>
+      <fieldset class="fs"><legend>실험 설정</legend><div class="grid2">${pv}</div></fieldset>
+      <fieldset class="fs"><legend>데이터</legend><div class="grid2">
+        <div class="field"><span class="lb">평가 셋</span>${chipGroup("f-split2", ["dev", "test"], ["dev (튜닝·탐색)", "test (최종 1회)"], [f.split])}
+          <span class="help">dev는 자유롭게, test는 방법을 확정한 뒤 한 번만 씁니다.</span></div>
+        <div class="field"><label for="f-n">대화 수 (긴 순서)</label><div class="inline"><input type="range" id="f-n-r" min="1" max="100" value="${f.n_dialogs}"><input type="number" id="f-n" min="1" max="100" value="${f.n_dialogs}"></div><span class="help">빠른 확인은 10~20개, 결론용은 100개.</span></div>
+        <div class="field"><span class="lb">침묵 비율</span>${chipGroup("f-ratios", [0.2, 0.4, 0.6], ["20%", "40%", "60%"], f.ratios)}</div>
+      </div>
+      <div id="testwarn" ${f.split === "test" ? "" : "hidden"} class="warnbox"><b>test 셋은 최종 평가용입니다.</b> 결과를 보고 설정을 바꾼 뒤 다시 돌리면 더 이상 held-out이 아닙니다. 실행 기록은 <span class="mono">splits/test_log.jsonl</span>에 남고 팀 전체가 봅니다.
+        <div id="testlog" class="small muted" style="margin-top:6px"></div>
+        <label class="check" style="margin-top:6px"><input type="checkbox" id="f-confirm" ${f.confirm_test ? "checked" : ""}> 이 설정은 dev에서 확정했고, test로 최종 평가합니다.</label></div>
+      </fieldset>
+      <fieldset class="fs"><legend>기록·자원</legend><div class="grid2">
+        <div class="field"><label for="f-member">담당자</label><select id="f-member2">${Object.entries(members).map(([k, v]) => `<option value="${k}" ${k === f.member ? "selected" : ""}>${esc(v.name)} (${k})</option>`).join("")}</select></div>
+        <div class="field"><label for="f-tag">태그</label><input type="text" id="f-tag" value="${esc(f.tag)}" maxlength="40" pattern="[A-Za-z0-9_-]+"><span class="help">run 폴더 이름에 들어갑니다. 영문, 숫자, -, _</span></div>
+        <div class="field"><label for="f-pairs">GPU 쌍</label><select id="f-pairs"><option value="0">자동 (비어 있는 쌍 모두)</option>${Array.from({ length: pairsN }, (_, i) => `<option value="${i + 1}" ${f.n_pairs === i + 1 ? "selected" : ""}>${i + 1}쌍</option>`).join("")}</select><span class="help">한 쌍 = 모델을 반씩 올린 GPU 2장 (24GB GPU는 1장)</span></div>
+        <div class="field"><span class="lb">정확성 검증</span><label class="check"><input type="checkbox" id="f-verify" ${f.skip_verify ? "" : "checked"}> 시작 전에 02_verify 실행 (+5분)</label><span class="help">코드를 바꿨다면 켜세요.</span></div>
+      </div>
+      <div class="field"><label for="f-note">메모</label><textarea id="f-note" maxlength="300" placeholder="무엇을 바꿨고 무엇을 보려는지. run 목록과 meta.json에 남습니다.">${esc(f.note)}</textarea></div>
+      </fieldset>
+      <div class="preview" aria-live="polite">
+        <div class="est" id="est"></div>
+        <pre class="cmd" id="cmd"></pre>
+        <div class="err" id="ferr"></div>
+      </div>
+      <div class="actions"><button class="btn primary" type="submit" id="submit">큐에 추가</button><button class="btn" type="button" id="copycmd">명령어 복사</button><span class="muted small">같은 명령을 터미널에서 직접 실행해도 결과는 같은 형식으로 저장됩니다.</span></div>
+    </form>`;
+  wireForm(e);
+}
+
+function wireForm(e) {
+  const f = form;
+  const chip = (id, getArr, multi, after) => $(id).querySelectorAll(".chip").forEach(b => b.onclick = () => {
+    const v = b.dataset.v, num = !isNaN(+v) && v !== "", val = num ? +v : v;
+    if (multi) { const a = getArr(); const i = a.map(String).indexOf(String(val)); i >= 0 ? a.splice(i, 1) : a.push(val); }
+    else getArr(val);
+    $(id).querySelectorAll(".chip").forEach(c => c.setAttribute("aria-pressed", String(multi ? getArr().map(String).includes(c.dataset.v) : c.dataset.v === String(f.split))));
+    if (after) after();
+    preview();
+  });
+  for (const p of e.params) {
+    if (p.type === "multi") chip("p-" + p.key, () => f.params[p.key], true);
+    else if (p.type === "int") {
+      const r = $("p-" + p.key + "-r"), n = $("p-" + p.key);
+      r.oninput = () => { n.value = r.value; f.params[p.key] = +r.value; preview(); };
+      n.oninput = () => { r.value = n.value; f.params[p.key] = +n.value; preview(); };
+    } else $("p-" + p.key).onchange = ev => { f.params[p.key] = ev.target.checked; preview(); };
+  }
+  chip("f-split2", v => { if (v !== undefined) f.split = v; return f.split; }, false, () => { $("testwarn").hidden = f.split !== "test"; loadTestLog(); });
+  chip("f-ratios", () => f.ratios, true);
+  const nr = $("f-n-r"), nn = $("f-n");
+  nr.oninput = () => { nn.value = nr.value; f.n_dialogs = +nr.value; preview(); };
+  nn.oninput = () => { nr.value = nn.value; f.n_dialogs = +nn.value; preview(); };
+  $("f-confirm").onchange = ev => { f.confirm_test = ev.target.checked; preview(); };
+  $("f-member2").onchange = ev => { f.member = ev.target.value; try { localStorage.setItem("fdkv-member", f.member); } catch (x) {} preview(); };
+  $("f-tag").oninput = ev => { f.tag = ev.target.value; preview(); };
+  $("f-pairs").onchange = ev => { f.n_pairs = +ev.target.value; preview(); };
+  $("f-verify").onchange = ev => { f.skip_verify = !ev.target.checked; preview(); };
+  $("f-note").oninput = ev => { f.note = ev.target.value; };
+  $("copycmd").onclick = () => {
+    const t = $("cmd").textContent;
+    navigator.clipboard.writeText(t).then(() => toast("명령어를 복사했습니다."), () => { const r = document.createRange(); r.selectNodeContents($("cmd")); getSelection().removeAllRanges(); getSelection().addRange(r); toast("선택했습니다. Ctrl+C로 복사하세요."); });
+  };
+  $("expform").onsubmit = async ev => {
+    ev.preventDefault();
+    if (!online) return toast("서버 모드에서만 실행할 수 있습니다.");
+    $("submit").disabled = true;
+    try {
+      const j = await post("api/jobs", f);
+      toast(`큐에 추가했습니다: ${j.run_dir}`);
+      location.hash = "#queue"; poll();
+    } catch (err) { $("ferr").textContent = err.message; }
+    $("submit").disabled = false;
+  };
+  if (f.split === "test") loadTestLog();
+  preview();
+}
+
+let pvTimer = null;
+function preview() {
+  clearTimeout(pvTimer);
+  pvTimer = setTimeout(async () => {
+    if (!form) return;
+    if (!online) {
+      $("est").innerHTML = `<div><span class="k">상태</span><span class="v" style="font-size:14px">서버에 연결되면 예상 시간과 명령어가 표시됩니다</span></div>`;
+      $("cmd").textContent = ""; $("submit").disabled = true; return;
+    }
+    try {
+      const r = await post("api/preview", form);
+      const e = r.estimate;
+      $("est").innerHTML = `<div><span class="k">변형(정책) 수</span><span class="v">${e.variants}</span></div>` +
+        `<div><span class="k">forward 수</span><span class="v">${e.forwards.toLocaleString()}</span></div>` +
+        `<div><span class="k">GPU 쌍</span><span class="v">${e.pairs}</span></div>` +
+        `<div><span class="k">예상 소요 (T4 기준)</span><span class="v">약 ${fmtDur(e.seconds)}</span></div>`;
+      $("cmd").textContent = r.command; $("ferr").textContent = ""; $("submit").disabled = false;
+    } catch (err) { $("ferr").textContent = err.message; $("submit").disabled = true; }
+  }, 150);
+}
+
+async function loadTestLog() {
+  if (!online) return;
+  try {
+    const l = await api("api/test_log");
+    $("testlog").innerHTML = l.length ? "이전 test 평가: " + l.map(x => `${esc(x.member)} · ${esc(x.tag)} (${fmtTime(x.started)})`).join(", ") : "이전 test 평가 기록이 없습니다.";
+  } catch (e) {}
+}
+
+// ---------------- queue ----------------
+function eta(j) {
+  const p = j.progress;
+  if (!p || !p.total || !p.done || !j.started) return "";
+  const el = (Date.now() - new Date(j.started).getTime()) / 1000;
+  return `남은 시간 약 ${fmtDur(el * (p.total - p.done) / p.done)}`;
+}
+function renderJobs() {
+  const js = STATE ? STATE.jobs : [];
+  $("qcount").textContent = js.filter(j => j.status === "queued" || j.status === "running").length;
+  if (!js.length) { $("jobs").innerHTML = `<tr><td class="muted">${online ? "아직 작업이 없습니다. '실험' 탭에서 큐에 추가하세요." : "서버 모드에서만 작업 큐를 볼 수 있습니다."}</td></tr>`; return; }
+  const exps = Object.fromEntries(REG.experiments.map(e => [e.id, e.title]));
+  $("jobs").innerHTML = `<thead><tr><th>상태</th><th>실험</th><th>담당자 · 태그</th><th>split</th><th>GPU</th><th>진행</th><th>생성 / 시작</th><th></th></tr></thead><tbody>` +
+    js.map(j => {
+      const p = j.progress || {}, pct = p.total ? Math.round(100 * p.done / p.total) : 0;
+      const prog = j.status === "running" ? `<div class="pbar"><div class="meter"><i style="width:${pct}%"></i></div><span class="small muted">${p.stage ? esc(p.stage) + " · " : ""}${p.total ? `${p.done}/${p.total} 파일` : "준비 중"}${eta(j) ? " · " + eta(j) : ""}</span></div>` :
+        (j.status === "queued" ? `<span class="small muted">GPU 대기</span>` : (j.error ? `<span class="small err">${esc(j.error)}</span>` : ""));
+      return `<tr class="${logJob === j.id ? "sel" : ""}"><td><span class="badge ${j.status}">${JOB[j.status] || j.status}</span></td><td>${esc(exps[j.exp] || j.exp)}</td>` +
+        `<td>${esc((STATE.members[j.member] || {}).name || j.member)} · <span class="mono">${esc(j.tag)}</span>${j.note ? `<div class="small muted">${esc(j.note)}</div>` : ""}</td>` +
+        `<td><span class="badge ${j.split}">${j.split}</span></td><td class="mono small">${(j.pairs || []).map(x => x.join(",")).join(" ") || (j.n_pairs ? j.n_pairs + "쌍" : "자동")}</td>` +
+        `<td>${prog}</td><td class="small mono">${fmtTime(j.created)}<br>${fmtTime(j.started)}</td>` +
+        `<td class="actions"><button class="btn sm" data-log="${j.id}" type="button">로그</button>` +
+        (j.status === "queued" || j.status === "running" ? `<button class="btn sm danger" data-cancel="${j.id}" type="button">취소</button>` : "") +
+        (j.status === "done" ? `<button class="btn sm" data-open="${esc(j.run_dir)}" type="button">결과</button>` : "") + `</td></tr>`;
+    }).join("") + `</tbody>`;
+  $("jobs").querySelectorAll("[data-log]").forEach(b => b.onclick = () => { logJob = b.dataset.log; logFile = "console"; renderJobs(); loadLog(); });
+  $("jobs").querySelectorAll("[data-cancel]").forEach(b => b.onclick = () => cancelJob(b.dataset.cancel, b));
+  $("jobs").querySelectorAll("[data-open]").forEach(b => b.onclick = () => { location.hash = "#runs"; openRun(b.dataset.open); });
+}
+async function cancelJob(id, btn) {
+  if (btn.dataset.armed !== "1") { btn.dataset.armed = "1"; btn.textContent = "정말 취소?"; setTimeout(() => { btn.dataset.armed = ""; btn.textContent = "취소"; }, 4000); return; }
+  try { await post(`api/jobs/${id}/cancel`, {}); toast("취소를 요청했습니다."); poll(); } catch (e) { toast(e.message); }
+}
+async function loadLog() {
+  if (!logJob || !online) return;
+  $("logpanel").hidden = false;
+  const j = STATE.jobs.find(x => x.id === logJob);
+  $("logtitle").textContent = `로그 · ${j ? j.tag : logJob}`;
+  try {
+    const r = await api(`api/jobs/${logJob}/log?n=400&file=${logFile}`);
+    const el = $("log"), atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    el.textContent = r.text || "(아직 출력이 없습니다)";
+    if (atBottom) el.scrollTop = el.scrollHeight;
+    $("logfiles").innerHTML = r.files.map(f => `<button type="button" class="chip" data-f="${esc(f)}" aria-pressed="${f === logFile}">${esc(f)}</button>`).join("");
+    $("logfiles").querySelectorAll(".chip").forEach(b => b.onclick = () => { logFile = b.dataset.f; loadLog(); });
+  } catch (e) { $("log").textContent = e.message; }
+}
+
+// ---------------- runs ----------------
+async function loadRuns() {
+  if (!online) { $("runs").innerHTML = `<tr><td class="muted">서버 모드에서만 결과를 조회할 수 있습니다. (터미널: <span class="mono">.venv/bin/python scripts/runs.py</span>)</td></tr>`; return; }
+  try { RUNS = await api("api/runs"); } catch (e) { return; }
+  $("rcount").textContent = RUNS.length;
+  const fm = $("f-member"), fe = $("f-exp");
+  if (!fm.options.length) {
+    fm.innerHTML = `<option value="">전체</option>` + Object.entries(STATE.members).map(([k, v]) => `<option value="${k}">${esc(v.name)}</option>`).join("");
+    fe.innerHTML = `<option value="">전체</option>` + REG.experiments.filter(e => e.status === "ready").map(e => `<option value="${e.id}">${esc(e.title)}</option>`).join("");
+    [fm, fe, $("f-split")].forEach(x => x.onchange = renderRuns);
+  }
+  renderRuns();
+}
+function renderRuns() {
+  const fm = $("f-member").value, fe = $("f-exp").value, fsp = $("f-split").value;
+  const exps = Object.fromEntries(REG.experiments.map(e => [e.id, e.title]));
+  const rs = RUNS.filter(r => (!fm || r.member === fm) && (!fe || r.exp === fe) && (!fsp || r.split === fsp));
+  $("runs").innerHTML = `<thead><tr><th></th><th>시작</th><th>담당자</th><th>실험</th><th>태그</th><th>split</th><th>상태</th><th class="num">대화</th><th>진행</th><th>메모</th></tr></thead><tbody>` +
+    rs.map(r => {
+      const p = r.progress || {};
+      return `<tr class="click ${detailRun === r.run ? "sel" : ""}" data-run="${esc(r.run)}"><td><input type="checkbox" aria-label="비교에 추가" data-cmp="${esc(r.run)}" ${cmpSel.has(r.run) ? "checked" : ""}></td>` +
+        `<td class="mono small">${fmtTime(r.started)}</td><td>${esc(r.name || r.member)}</td><td>${esc(exps[r.exp] || r.exp)}</td><td class="mono">${esc(r.tag)}</td>` +
+        `<td><span class="badge ${r.split || "dev"}">${r.split || "dev"}</span></td><td><span class="badge ${r.status}">${JOB[r.status] || r.status}</span></td>` +
+        `<td class="num">${r.n_dialogs}</td><td class="small muted">${p.total ? `${p.done}/${p.total}` : (r.has_analysis ? "분석 완료" : "")}</td><td class="small">${esc(r.note || "")}</td></tr>`;
+    }).join("") + `</tbody>`;
+  $("runs").querySelectorAll("tr[data-run]").forEach(tr => tr.onclick = ev => { if (ev.target.matches("input")) return; openRun(tr.dataset.run); });
+  $("runs").querySelectorAll("input[data-cmp]").forEach(c => c.onchange = () => { c.checked ? cmpSel.add(c.dataset.cmp) : cmpSel.delete(c.dataset.cmp); $("cmpbtn").disabled = cmpSel.size < 2; });
+  $("cmpbtn").disabled = cmpSel.size < 2;
+}
+
+function variantTable(rows, ratio) {
+  const rs = rows.filter(r => Math.abs(+r.ratio - ratio) < 1e-6);
+  const pols = [...new Set(rs.map(r => r.policy))];
+  const mets = METRICS.filter(([m]) => rs.some(r => r.metric === m));
+  if (!pols.length) return `<p class="muted">이 침묵 비율의 결과가 없습니다.</p>`;
+  return `<div class="tbox"><table><thead><tr><th>정책 / 변형</th>${mets.map(([, l]) => `<th class="num">${l}</th>`).join("")}</tr></thead><tbody>` +
+    pols.map(p => `<tr><td class="mono">${esc(p)}</td>` + mets.map(([m]) => {
+      const r = rs.find(x => x.policy === p && x.metric === m);
+      if (!r) return `<td class="num">–</td>`;
+      const v = +r.mean_diff, s = r.significant === "True";
+      return `<td class="num ${s ? "sig " + (v > 0 ? "pos" : "neg") : ""}" title="95% CI ${(+r.ci95_lo).toFixed(3)} ~ ${(+r.ci95_hi).toFixed(3)} · p(Holm) ${(+r.p_holm).toFixed(4)}">${sgn(v)}${s ? "*" : ""}</td>`;
+    }).join("") + `</tr>`).join("") + `</tbody></table></div>`;
+}
+
+async function openRun(path) {
+  detailRun = path; renderRuns();
+  const box = $("rundetail"); box.hidden = false; box.innerHTML = `<p class="muted">불러오는 중…</p>`;
+  let d; try { d = await api("api/run?path=" + encodeURIComponent(path)); } catch (e) { box.innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
+  const m = d.meta, ratios = [...new Set(d.variants.map(r => +r.ratio))].sort();
+  let ratio = ratios.includes(0.6) ? 0.6 : ratios[ratios.length - 1];
+  const kv = [["담당자", m.name || m.member], ["실험", m.exp || "kv_policy"], ["split", m.split || "dev"], ["상태", JOB[m.status] || m.status],
+    ["시작 / 종료", `${fmtTime(m.started)} → ${fmtTime(m.finished)}`], ["대화 수", m.n_dialogs], ["침묵 비율", (m.ratios || []).join(", ")],
+    ["코드", `${m.git_commit || "커밋 없음"}${m.git_dirty ? " (커밋 안 된 수정 있음)" : ""}`], ["GPU", m.gpu_pairs], ["인자", (m.nll_args || []).join(" ") || "기본값"]];
+  const hyp = d.hypotheses.length ? `<h3>가설 검정</h3><div class="tbox"><table><thead><tr><th>가설</th><th>비교</th><th>지표</th><th>침묵</th><th class="num">차이</th><th class="num">95% CI</th><th class="num">p (Holm)</th></tr></thead><tbody>` +
+    d.hypotheses.filter(h => h.ratio === "0.6" || h.family === "H3").map(h => `<tr><td>${esc(h.family)}</td><td class="mono small">${esc(h.contrast)}</td><td>${esc(h.metric)}</td><td>${esc(h.ratio)}</td>` +
+      `<td class="num ${h.significant === "True" ? "sig" : ""}">${sgn(+h.mean_diff)}</td><td class="num small">${(+h.ci95_lo).toFixed(3)} ~ ${(+h.ci95_hi).toFixed(3)}</td><td class="num">${(+h.p_holm).toFixed(4)}</td></tr>`).join("") +
+    `</tbody></table></div><p class="muted small" style="margin:0">침묵 60%와 H3만 표시합니다. 전체는 run 폴더의 <span class="mono">nll/analysis/hypotheses.md</span>에 있습니다.</p>` : "";
+  const draw = () => {
+    box.innerHTML = `<div class="bar"><h2>${esc(m.name || m.member)} · ${esc(m.tag)}</h2><span class="badge ${m.split || "dev"}">${m.split || "dev"}</span><span class="sp"></span>${(m.exp || "kv_policy") === "kv_policy" ? `<a href="sim/">시뮬레이터 →</a>` : ""}</div>
+      <p class="mono small muted" style="margin:0">${esc(path)}</p>
+      ${m.note ? `<p style="margin:0">${esc(m.note)}</p>` : ""}
+      <div class="kv">${kv.map(([k, v]) => `<div><span class="k">${k}</span><span class="v">${esc(v)}</span></div>`).join("")}</div>
+      ${d.variants.length ? `<div class="bar"><h3>기준(full context) 대비 ΔNLL</h3><span class="sp"></span>${chipGroup("rd-ratio", ratios, ratios.map(r => `침묵 ${Math.round(r * 100)}%`), [ratio])}</div>
+        <p class="muted small" style="margin:0">양수 = 나빠짐. * = Holm 보정 후 유의(p&lt;0.05). 셀에 마우스를 올리면 신뢰구간이 보입니다.</p>${variantTable(d.variants, ratio)}` :
+        `<p class="muted">${d.progress.total ? `실행 중입니다 (${d.progress.done}/${d.progress.total} 파일). 끝나면 분석이 표시됩니다.` : "분석 결과가 아직 없습니다."}</p>`}
+      ${hyp}
+      ${d.figures.length ? `<h3>그래프</h3><div class="figs">${d.figures.map(f => `<img src="${esc(f)}" alt="${esc(f.split("/").pop())}" loading="lazy">`).join("")}</div>` : ""}`;
+    const rc = $("rd-ratio");
+    if (rc) rc.querySelectorAll(".chip").forEach(b => b.onclick = () => { ratio = +b.dataset.v; draw(); });
+  };
+  draw();
+  box.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+$("cmpbtn").onclick = () => renderCompare("text_nll_content", 0.6);
+async function renderCompare(metric, ratio) {
+  const box = $("cmppanel"); box.hidden = false;
+  const runs = [...cmpSel];
+  let d; try { d = await api(`api/compare?runs=${encodeURIComponent(runs.join(","))}&metric=${metric}&ratio=${ratio}`); } catch (e) { box.innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
+  box.innerHTML = `<div class="bar"><h2>run 비교</h2><span class="sp"></span><button class="btn sm" type="button" id="cmpclose">닫기</button></div>
+    <div class="filters"><div class="field"><label for="cmp-m">지표</label><select id="cmp-m">${METRICS.map(([m, l]) => `<option value="${m}" ${m === metric ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+    <div class="field"><label for="cmp-r">침묵 비율</label><select id="cmp-r">${[0.2, 0.4, 0.6].map(r => `<option value="${r}" ${r === ratio ? "selected" : ""}>${r * 100}%</option>`).join("")}</select></div></div>
+    <div class="tbox"><table><thead><tr><th>정책 / 변형</th>${d.cols.map(c => `<th class="num">${esc(c.label)}</th>`).join("")}</tr></thead><tbody>` +
+    (d.rows.length ? d.rows.map(r => `<tr><td class="mono">${esc(r.policy)}</td>${d.cols.map(c => { const x = r.cells[c.run]; if (!x) return `<td class="num muted">–</td>`; const s = x.significant === "True", v = +x.mean_diff; return `<td class="num ${s ? "sig " + (v > 0 ? "pos" : "neg") : ""}" title="95% CI ${(+x.ci95_lo).toFixed(3)} ~ ${(+x.ci95_hi).toFixed(3)}">${sgn(v)}${s ? "*" : ""}</td>`; }).join("")}</tr>`).join("") :
+      `<tr><td colspan="${d.cols.length + 1}" class="muted">공통 결과가 없습니다. 분석이 끝난 run인지 확인하세요.</td></tr>`) +
+    `</tbody></table></div><p class="muted small" style="margin:0">값은 각 run의 기준(full context) 대비 ΔNLL입니다. dev와 test를 나란히 놓으면 일반화를 확인할 수 있습니다.</p>`;
+  $("cmp-m").onchange = () => renderCompare($("cmp-m").value, +$("cmp-r").value);
+  $("cmp-r").onchange = () => renderCompare($("cmp-m").value, +$("cmp-r").value);
+  $("cmpclose").onclick = () => box.hidden = true;
+}
+
+// ---------------- polling ----------------
+async function poll() {
+  try {
+    STATE = await api("api/state");
+    if (!online) { online = true; $("ro").hidden = true; if (sel) selectExp(sel); }
+    $("conn").className = "conn on"; $("conn").lastChild.textContent = `연결됨 · ${STATE.time.slice(11, 19)}`;
+  } catch (e) {
+    online = false; $("ro").hidden = false;
+    $("conn").className = "conn off"; $("conn").lastChild.textContent = "서버 없음 (읽기 전용)";
+  }
+  renderGpus(); renderJobs();
+  if (logJob && !$("tab-queue").hidden) loadLog();
+}
+
+async function boot() {
+  try { REG = await api("api/experiments"); }
+  catch (e) { try { REG = await (await fetch("experiments.json")).json(); } catch (x) { $("detail").innerHTML = `<p class="err">실험 목록을 불러오지 못했습니다.</p>`; return; } }
+  await poll();
+  renderCatalog();
+  let first = "kv_policy";
+  try { first = localStorage.getItem("fdkv-exp") || first; } catch (e) {}
+  selectExp(REG.experiments.some(e => e.id === first) ? first : "kv_policy");
+  route();
+  setInterval(poll, 3000);
+  setInterval(() => { if (!$("tab-runs").hidden) loadRuns(); }, 15000);
+}
+boot();
+</script>
+</body>
+</html>
